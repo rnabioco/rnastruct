@@ -52,7 +52,7 @@ def format_bedgraphs(df, depth, prefix):
     df = df.assign(start = lambda df:df.pos - 1)
     df = df.rename(columns = {'pos':'end'})
     
-#    df = df[df.depth >= depth]
+    df = df[df.depth >= depth]
 
     df_mm = df[['chr', 'start', 'end', 'mismatch_ratio']]
     df_ins = df[['chr', 'start', 'end', 'insertion_ratio']]
