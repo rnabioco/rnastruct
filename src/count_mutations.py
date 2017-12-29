@@ -5,6 +5,7 @@ import sys
 import subprocess
 import gzip
 import tempfile
+import pandas as pd
 from collections import Counter
 
 
@@ -26,62 +27,93 @@ def generate_pileup(bam, fasta, additional_args):
                   additional_args + " " + \
                   bam + " " + \
                   " | " + \
-                  "./mpileup2readcounts/bin/mpileup2readcounts - "
+                  "./mpileup2readcounts/bin/mpileup2readcounts - " + \
+                  " | gzip "
                  
     print("pileup command is:\n" + pileup_cmd, file = sys.stderr)
     
+    print("formatted pileup output is here:\n" + temp_output.name, 
+            file = sys.stderr)
+
     pileup_run = subprocess.run(pileup_cmd, 
             shell=True, stderr = sys.stderr, stdout = temp_output)
     
+    print("completed pileup", file = sys.stderr)
+
     return temp_output
 
-def format_bedgraphs(fname):
+def format_bedgraphs(df, depth, prefix):
+    """ take pandas dataframe and generate bedgraphs """
 
-    f = open(fname)
-    mismatches = open("mismatch.bg", "w") 
-    inserts = open("insertions.bg", "w")
-    dels = open("deletions.bg", "w")
-   
-    header = f.readline()
-    for line in f:
-        line = line.rstrip()
-        chrom, end, strand, depth, ref_base,\
-        ref_count, acount, ccount, tcount, gcount, \
-        ncount, delcount, inscount = line.split("\t")
-        
-        # one-based input, zero-based output
-        start = int(end) - 1
-        shared_cols = [chrom, start, end]
-        
-        mm_counts = [acount, ccount, tcount, gcount]
-        mm_counts = [int(x) for x in mm_counts]
-
-        if any([x > 0 for x in mm_counts]):
-            mismatch = shared_cols + mm_counts 
-            mismatch = [str(x) for x in mismatch]
-            mismatches.write("\t".join(mismatch) + "\n")
-        
-        if int(inscount) > 0:
-            insertions = shared_cols + [inscount]
-            insertions = [str(x) for x in insertions]
-            inserts.write("\t".join(insertions) + "\n")
-        
-        if int(delcount) > 0:
-            deletions = shared_cols + [delcount]
-            deletions = [str(x) for x in deletions]
-            dels.write("\t".join(deletions) + "\n")
+    df = df.assign(mismatch_ratio = lambda df:1 - (df.refcount / df.depth))
+    df = df.assign(insertion_ratio = lambda df: df.inscount / df.depth)
+    df = df.assign(deletion_ratio = lambda df: df.delcount / df.depth)
     
+    df = df.assign(start = lambda df:df.pos - 1)
+    df = df.rename(columns = {'pos':'end'})
+    
+#    df = df[df.depth >= depth]
 
-def generate_mismatch_profile(bam, fasta, additional_args):
+    df_mm = df[['chr', 'start', 'end', 'mismatch_ratio']]
+    df_ins = df[['chr', 'start', 'end', 'insertion_ratio']]
+    df_del = df[['chr', 'start', 'end', 'deletion_ratio']]
+
+    df_mm = df_mm.sort_values(['chr', 'start'], ascending=[True, True])
+    df_ins = df_ins.sort_values(['chr', 'start'], ascending=[True, True])
+    df_del = df_del.sort_values(['chr', 'start'], ascending=[True, True])
+    
+    df_mm.to_csv(prefix + "mismatches.bg.gz", sep= "\t", index=False, header=False, compression='gzip')
+    df_ins.to_csv(prefix + "insertions.bg.gz", sep= "\t", index=False, header=False, compression='gzip')
+    df_del.to_csv(prefix + "deletions.bg.gz", sep= "\t", index=False, header=False, compression='gzip')
+
+    
+def parse_library_type(bam, libtype):
+    pass
+
+    
+##    # 1. alignments of the second in pair if they map to the forward strand
+#    # 2. alignments of the first in pair if their mate maps to the forward strand
+#    
+#    samtools view -b -f 128 -F 16 $DATA > fwd1.bam
+#    samtools index fwd1.bam
+#
+#    samtools view -b -f 64 -F 32 $DATA > fwd2.bam
+#    samtools index fwd2.bam
+#    
+#    samtools merge -f fwd.bam fwd1.bam fwd2.bam
+#    samtools index fwd.bam
+#
+#    # 1. alignments of the second in pair if it maps to the reverse strand
+#    # 2. alignments of the first in pair if their mates map to the reverse strand
+#    
+#    samtools view -b -f 144 $DATA > rev1.bam
+#    samtools index rev1.bam
+#
+#    samtools view -b -f 96 $DATA > rev2.bam
+#    samtools index rev2.bam
+#
+#    samtools merge -f rev.bam rev1.bam rev2.bam
+#    samtools index rev.bam
+
+def generate_mismatch_profile(bam, fasta, additional_args, depth):
     
     # generate per nucleotide mismatch and indel counts
     temp_output = generate_pileup(bam, fasta, additional_args)
     temp_output.close()
     
-    # parse into bedgraphs
-    format_bedgraphs(temp_output.name) 
-    os.unlink(temp_output.name)
+    # parse into bedgraphs (pos and neg)
+    df = pd.read_table(temp_output.name,
+              compression='gzip')
+    
+    df_pos = df[df.strand == "+"]
+    df_neg = df[df.strand == "-"]
 
+    format_bedgraphs(df_pos, depth, "pos_") 
+    format_bedgraphs(df_neg, depth, "neg_")
+    
+    # cleanup
+    os.unlink(temp_output.name)
+    
 def main():
     
     parser = argparse.ArgumentParser(description="""
@@ -116,13 +148,26 @@ def main():
                         """, 
                         required = False,
                         default = " -d 10000000 -L 10000000 -B ")
+    
+    parser.add_argument('-d',
+                        '--depth',
+                        help = """minimum read coverage required for
+                        reporting mismatch or indel frequencies. 
+                        Default = 5""", 
+                        required = False, 
+                        default = 5, type = float)
 
     args=parser.parse_args()
     
     bam_name = args.bam
     pileup_args = args.pileup    
     fasta_name = args.fasta
-    generate_mismatch_profile(bam_name, fasta_name, pileup_args) 
+    depth = args.depth
+
+    generate_mismatch_profile(bam_name, 
+            fasta_name, 
+            pileup_args,
+            depth) 
                 
 if __name__ == '__main__': main()
 
