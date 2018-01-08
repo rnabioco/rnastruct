@@ -5,11 +5,12 @@ import sys
 import subprocess
 import gzip
 import tempfile
+from datetime import datetime
 import pandas as pd
 from collections import Counter
 
 
-def generate_pileup(bam, fasta, additional_args):
+def generate_pileup(bam, fasta, additional_args, outpre):
     """ returns tempfile pointing to pileup output 
     
     args:
@@ -19,7 +20,7 @@ def generate_pileup(bam, fasta, additional_args):
     """
 
 
-    temp_output = tempfile.NamedTemporaryFile(delete=False)
+    output = open(outpre + "pileup_table.tsv.gz", "w")
 
     pileup_cmd = "samtools " + \
                   "mpileup " + \
@@ -27,20 +28,21 @@ def generate_pileup(bam, fasta, additional_args):
                   additional_args + " " + \
                   bam + " " + \
                   " | " + \
-                  "./mpileup2readcounts/bin/mpileup2readcounts - " + \
+                  "mpileupToReadCounts - " + \
                   " | gzip "
                  
     print("pileup command is:\n" + pileup_cmd, file = sys.stderr)
     
-    print("formatted pileup output is here:\n" + temp_output.name, 
+    print("formatted pileup output is here:\n" + output.name, 
             file = sys.stderr)
 
     pileup_run = subprocess.run(pileup_cmd, 
-            shell=True, stderr = sys.stderr, stdout = temp_output)
+            shell=True, stderr = sys.stderr, stdout = output)
     
-    print("completed pileup", file = sys.stderr)
+    print("completed pileup {}".format(str(datetime.now())), 
+            file = sys.stderr)
 
-    return temp_output
+    return output
 
 def format_bedgraphs(df, depth, prefix):
     """ take pandas dataframe and generate bedgraphs """
@@ -62,9 +64,9 @@ def format_bedgraphs(df, depth, prefix):
     df_ins = df_ins.sort_values(['chr', 'start'], ascending=[True, True])
     df_del = df_del.sort_values(['chr', 'start'], ascending=[True, True])
     
-    df_mm.to_csv(prefix + "mismatches.bg.gz", sep= "\t", index=False, header=False, compression='gzip')
-    df_ins.to_csv(prefix + "insertions.bg.gz", sep= "\t", index=False, header=False, compression='gzip')
-    df_del.to_csv(prefix + "deletions.bg.gz", sep= "\t", index=False, header=False, compression='gzip')
+    df_mm.to_csv(prefix + "mismatches.bedgraph.gz", sep= "\t", index=False, header=False, compression='gzip')
+    df_ins.to_csv(prefix + "insertions.bedgraph.gz", sep= "\t", index=False, header=False, compression='gzip')
+    df_del.to_csv(prefix + "deletions.bedgraph.gz", sep= "\t", index=False, header=False, compression='gzip')
 
     
 def parse_library_type(bam, libtype):
@@ -95,24 +97,27 @@ def parse_library_type(bam, libtype):
 #    samtools merge -f rev.bam rev1.bam rev2.bam
 #    samtools index rev.bam
 
-def generate_mismatch_profile(bam, fasta, additional_args, depth):
+def generate_mismatch_profile(bam, fasta, additional_args, depth, outpre):
     
+    print("started processing {}".format(str(datetime.now())),
+            file = sys.stderr)
+
     # generate per nucleotide mismatch and indel counts
-    temp_output = generate_pileup(bam, fasta, additional_args)
-    temp_output.close()
+    output = generate_pileup(bam, fasta, additional_args, outpre)
+    output.close()
     
     # parse into bedgraphs (pos and neg)
-    df = pd.read_table(temp_output.name,
+    df = pd.read_table(output.name,
               compression='gzip')
     
     df_pos = df[df.strand == "+"]
     df_neg = df[df.strand == "-"]
 
-    format_bedgraphs(df_pos, depth, "pos_") 
-    format_bedgraphs(df_neg, depth, "neg_")
+    format_bedgraphs(df_pos, depth, outpre + "pos_") 
+    format_bedgraphs(df_neg, depth, outpre + "neg_")
     
     # cleanup
-    os.unlink(temp_output.name)
+    #os.unlink(temp_output.name)
     
 def main():
     
@@ -156,18 +161,25 @@ def main():
                         Default = 5""", 
                         required = False, 
                         default = 5, type = float)
-
+    
+    parser.add_argument('-o',
+                        '--outpre',
+                        help="""prefix for output files""",
+                        required = False,
+                        default = "")
     args=parser.parse_args()
     
     bam_name = args.bam
     pileup_args = args.pileup    
     fasta_name = args.fasta
     depth = args.depth
+    outpre = args.outpre
 
     generate_mismatch_profile(bam_name, 
             fasta_name, 
             pileup_args,
-            depth) 
+            depth,
+            outpre) 
                 
 if __name__ == '__main__': main()
 
