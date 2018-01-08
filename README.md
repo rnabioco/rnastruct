@@ -15,7 +15,7 @@ macOS by installing the `Xcode` command line tools)
 ## Install 
 
 ```bash
-git clone git@github.com:rnabioco/rnastruct
+git clone --recursive git@github.com:rnabioco/rnastruct
 cd rnastruct/src
 make
 ```
