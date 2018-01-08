@@ -4,14 +4,48 @@ import os
 import sys
 import subprocess
 import gzip
-import tempfile
-from datetime import datetime
 import pandas as pd
+import uuid 
+import shutil
+from datetime import datetime
 from collections import Counter
+from multiprocessing import Pool
+from functools import partial
 
+def retrieve_header(bam):
+    """
+    args:
+      bam = path to bam
+    
+    return:
+      list of contigs
+    """
+    get_header = ["samtools", "view", "-H", bam]
 
-def generate_pileup(bam, fasta, additional_args, outpre):
-    """ returns tempfile pointing to pileup output 
+    header_call = subprocess.run(get_header, 
+            stdout = subprocess.PIPE, 
+            universal_newlines = True).stdout
+    contigs = []
+    for line in header_call.splitlines():
+       
+        # keep contig lines
+        if not line.startswith("@SQ"):
+            continue
+        
+        contig_id = line.split("\t")[1]
+        # drop "SN" 
+        if contig_id.startswith('SN:'):
+            contig_id = contig_id[3:]
+        else:
+            print("non-standard contig found in header {}".format(contig_id, 
+                        file = sys.stderr))
+
+        contigs.append(contig_id)
+    
+    return contigs
+
+def generate_pileup(bam, fasta, outpre, additional_args, verbose = False):
+    """ returns fileobject to pileup output 
     
     args:
         bam = path to bam
@@ -31,18 +65,23 @@ def generate_pileup(bam, fasta, additional_args, outpre):
                   "mpileupToReadCounts - " + \
                   " | gzip "
                  
-    print("pileup command is:\n" + pileup_cmd, file = sys.stderr)
-    
-    print("formatted pileup output is here:\n" + output.name, 
-            file = sys.stderr)
+    if verbose:
 
-    pileup_run = subprocess.run(pileup_cmd, 
+        pileup_run = subprocess.run(pileup_cmd, 
             shell=True, stderr = sys.stderr, stdout = output)
-    
-    print("completed pileup {}".format(str(datetime.now())), 
-            file = sys.stderr)
+        
+        print("pileup command is:\n" + pileup_cmd, file = sys.stderr)
+        
+        print("formatted pileup output is here:\n" + output.name, 
+                file = sys.stderr)
+        print("completed pileup {}".format(str(datetime.now())), 
+                file = sys.stderr)
+    else:
+        pileup_run = subprocess.run(pileup_cmd, 
+            shell=True, stderr = subprocess.PIPE, stdout = output)
 
-    return output
+    output.close()
+    return output.name
 
 def format_bedgraphs(df, depth, prefix):
     """ take pandas dataframe and generate bedgraphs """
@@ -97,27 +136,76 @@ def parse_library_type(bam, libtype):
 #    samtools merge -f rev.bam rev1.bam rev2.bam
 #    samtools index rev.bam
 
-def generate_mismatch_profile(bam, fasta, additional_args, depth, outpre):
+def generate_mismatch_profile(input_bam, fasta, additional_args, depth, outpre,
+        threads = 1, debug = False):
     
-    print("started processing {}".format(str(datetime.now())),
+    if debug:
+        print("started processing {}".format(str(datetime.now())),
             file = sys.stderr)
 
     # generate per nucleotide mismatch and indel counts
-    output = generate_pileup(bam, fasta, additional_args, outpre)
-    output.close()
+    if threads == 1:
+        output = generate_pileup(input_bam, fasta, outpre, additional_args)
+    
+    else:
+        """ if multiple threads then run mpileup on each chromosome using
+        the region arg. Write output to temp folder, and combine results
+        using pd.concat(). Use concat instead of more traditional
+        approaches as there is a header line for each output that would
+        need to be dropped before combining.
+        """
+        contigs = retrieve_header(input_bam)
+        
+        if "-r " in additional_args:
+            print("-r option is not allowed when running with multiple threads", file = sys.stderr)
+        
+        # generate list of new regional arguments to pass in parallel
+        new_args = [additional_args + " -r " + x + " " for x in contigs]
+
+        pool = Pool(threads)
+        
+        # build function obj
+        func = partial(generate_pileup,
+            input_bam,
+            fasta,
+            verbose = debug)
+        
+        # make tmp directory
+        tmp_dir = "tmpfiles-" + str(uuid.uuid4())
+        if not os.path.exists(tmp_dir): os.makedirs(tmp_dir)
+        
+        # generate prefixes that with tmp_dir and contig id
+        new_pres = [os.path.join(tmp_dir, x + "_") for x in contigs] 
+        
+        parallel_args = zip(new_pres, new_args)
+
+        # star map will unpack the tuple and apply the args
+        res = pool.starmap(func, parallel_args)
+
+        # concat with pandas to drop header from each file
+        df = pd.DataFrame()
+        for fn in res:
+            data = pd.read_table(fn,
+                compression='gzip')
+            df = pd.concat([df, data],axis=0,ignore_index=True)  
+        
+        output = outpre + "pileup_table.tsv.gz"
+        df.to_csv(output, sep= "\t", index=False, header=True, compression='gzip')
+
+        shutil.rmtree(tmp_dir, ignore_errors=False, onerror=None)
     
     # parse into bedgraphs (pos and neg)
-    df = pd.read_table(output.name,
+    df = pd.read_table(output,
               compression='gzip')
+    
+    
+    # parse into bedgraphs (pos and neg)
     
     df_pos = df[df.strand == "+"]
     df_neg = df[df.strand == "-"]
 
     format_bedgraphs(df_pos, depth, outpre + "pos_") 
     format_bedgraphs(df_neg, depth, outpre + "neg_")
-    
-    # cleanup
-    #os.unlink(temp_output.name)
     
 def main():
     
@@ -167,6 +255,24 @@ def main():
                         help="""prefix for output files""",
                         required = False,
                         default = "")
+    
+    parser.add_argument('-t',
+                        '--threads',
+                        help="""Threads to use when running mpileup. If
+                        threads is > 1 then the mpileup command will be
+                        split up by chromosome to run using multiple
+                        threads
+                        default = 1""",
+                        required = False,
+                        default = 1,
+                        type = int)
+    
+    parser.add_argument('-v',
+                        '--verbose',
+                        help="""print run information""",
+                        required = False,
+                        default = False)
+
     args=parser.parse_args()
     
     bam_name = args.bam
@@ -174,12 +280,16 @@ def main():
     fasta_name = args.fasta
     depth = args.depth
     outpre = args.outpre
+    threads = args.threads
+    verbose = args.verbose
 
     generate_mismatch_profile(bam_name, 
             fasta_name, 
             pileup_args,
             depth,
-            outpre) 
+            outpre,
+            threads,
+            verbose) 
                 
 if __name__ == '__main__': main()
 
