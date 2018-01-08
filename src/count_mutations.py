@@ -44,7 +44,7 @@ def retrieve_header(bam):
     
     return contigs
 
-def generate_pileup(bam, fasta, outpre, additional_args, verbose = False):
+def generate_pileup(bam, fasta, min_depth, outpre, additional_args, verbose = False):
     """ returns fileobject to pileup output 
     
     args:
@@ -62,7 +62,8 @@ def generate_pileup(bam, fasta, outpre, additional_args, verbose = False):
                   additional_args + " " + \
                   bam + " " + \
                   " | " + \
-                  "mpileupToReadCounts - " + \
+                  "mpileupToReadCounts -d " + \
+                  str(min_depth) + \
                   " | gzip "
                  
     if verbose:
@@ -145,7 +146,7 @@ def generate_mismatch_profile(input_bam, fasta, additional_args, depth, outpre,
 
     # generate per nucleotide mismatch and indel counts
     if threads == 1:
-        output = generate_pileup(input_bam, fasta, outpre, additional_args)
+        output = generate_pileup(input_bam, fasta, depth, outpre, additional_args)
     
     else:
         """ if multiple threads then run mpileup on each chromosome using
@@ -168,6 +169,7 @@ def generate_mismatch_profile(input_bam, fasta, additional_args, depth, outpre,
         func = partial(generate_pileup,
             input_bam,
             fasta,
+            depth,
             verbose = debug)
         
         # make tmp directory
@@ -276,7 +278,9 @@ def main():
     args=parser.parse_args()
     
     bam_name = args.bam
-    pileup_args = args.pileup    
+
+    # ok to have repeated args in samtools command
+    pileup_args =  " -d 10000000 -L 10000000 -B " + args.pileup    
     fasta_name = args.fasta
     depth = args.depth
     outpre = args.outpre
