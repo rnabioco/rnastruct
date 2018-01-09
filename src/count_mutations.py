@@ -143,6 +143,12 @@ def generate_mismatch_profile(input_bam, fasta, additional_args, depth, outpre,
     if debug:
         print("started processing {}".format(str(datetime.now())),
             file = sys.stderr)
+    
+    
+    outdir = os.path.dirname(outpre)
+    # create directory if it does not exist
+    if not os.path.exists(outdir):
+        os.makedirs(outdir)
 
     # generate per nucleotide mismatch and indel counts
     if threads == 1:

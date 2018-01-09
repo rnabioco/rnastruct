@@ -35,7 +35,7 @@ Test your install
 ```
 count_mutations.py -h
 usage: count_mutations.py [-h] -b BAM -f FASTA [-p PILEUP] [-d DEPTH]
-                          [-o OUTPRE]
+                          [-o OUTPRE] [-t THREADS] [-v VERBOSE]
 
 Parse bam file and enumerate mismatches, insertions, and deletions per
 nucleotide. Generates bedgraphs for mismatches, insertions and deletions, as
@@ -63,6 +63,12 @@ optional arguments:
                         or indel frequencies. Default = 5
   -o OUTPRE, --outpre OUTPRE
                         prefix for output files
+  -t THREADS, --threads THREADS
+                        Threads to use when running mpileup. If threads is > 1
+                        then the mpileup command will be split up by
+                        chromosome to run using multiple threads default = 1
+  -v VERBOSE, --verbose VERBOSE
+                        print run information
 ```
 
 ## Generate mismatch and indel bedgraphs
