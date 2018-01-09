@@ -85,30 +85,32 @@ def generate_pileup(bam, fasta, min_depth, outpre, additional_args, verbose = Fa
     return output.name
 
 def format_bedgraphs(df, depth, prefix):
-    """ take pandas dataframe and generate bedgraphs """
 
+    """ take pandas dataframe and generate bedgraphs """
     df = df.assign(mismatch_ratio = lambda df:1 - (df.refcount / df.depth))
     df = df.assign(insertion_ratio = lambda df: df.inscount / df.depth)
     df = df.assign(deletion_ratio = lambda df: df.delcount / df.depth)
-    
+
     df = df.assign(start = lambda df:df.pos - 1)
     df = df.rename(columns = {'pos':'end'})
-    
+
     df = df[df.depth >= depth]
 
     df_mm = df[['chr', 'start', 'end', 'mismatch_ratio']]
     df_ins = df[['chr', 'start', 'end', 'insertion_ratio']]
     df_del = df[['chr', 'start', 'end', 'deletion_ratio']]
+    df_depth = df[['chr', 'start', 'end', 'depth']]
 
     df_mm = df_mm.sort_values(['chr', 'start'], ascending=[True, True])
     df_ins = df_ins.sort_values(['chr', 'start'], ascending=[True, True])
     df_del = df_del.sort_values(['chr', 'start'], ascending=[True, True])
-    
+    df_depth = df_depth.sort_values(['chr', 'start'], ascending = [True, True])
+
     df_mm.to_csv(prefix + "mismatches.bedgraph.gz", sep= "\t", index=False, header=False, compression='gzip')
     df_ins.to_csv(prefix + "insertions.bedgraph.gz", sep= "\t", index=False, header=False, compression='gzip')
     df_del.to_csv(prefix + "deletions.bedgraph.gz", sep= "\t", index=False, header=False, compression='gzip')
+    df_depth.to_csv(prefix + "depth.bedgraph.gz", sep= "\t", index=False, header=False, compression='gzip')
 
-    
 def parse_library_type(bam, libtype):
     pass
 
@@ -188,8 +190,12 @@ def generate_mismatch_profile(input_bam, fasta, additional_args, depth, outpre,
         parallel_args = zip(new_pres, new_args)
 
         # star map will unpack the tuple and apply the args
-        res = pool.starmap(func, parallel_args)
-
+        res = []
+        for results in pool.starmap(func, parallel_args):
+            res.append(results)
+        pool.close()
+        pool.join()
+        
         # concat with pandas to drop header from each file
         df = pd.DataFrame()
         for fn in res:
