@@ -298,6 +298,10 @@ def main():
     outpre = args.outpre
     threads = args.threads
     verbose = args.verbose
+    
+    if not os.path.isfile(bam_name) or not os.path.isfile(fasta_name):
+        sys.exit("input bam {} or fasta {} not found".format(bam_name,
+            fasta_name))
 
     generate_mismatch_profile(bam_name, 
             fasta_name, 
