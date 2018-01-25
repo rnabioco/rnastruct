@@ -222,6 +222,7 @@ void split_sam(string line, int max_del, bool clip_read = true){
     }
   } else {
     // report unmodified record
+    cout << sam << endl ; 
   }
 }
   
