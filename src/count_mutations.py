@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import textwrap
 import os 
 import sys
 import subprocess
@@ -8,10 +9,13 @@ import pandas as pd
 import uuid 
 import shutil
 import itertools
+import heapq
+from contextlib import ExitStack
 from datetime import datetime
 from collections import Counter
 from multiprocessing import Pool
 from functools import partial
+from operator import itemgetter
 
 def retrieve_header(bam):
     """
@@ -46,7 +50,7 @@ def retrieve_header(bam):
     return contigs
 
 def generate_pileup(bam, fasta, min_depth, deletion_length, 
-                    additional_args, outpre, region = "", verbose = False):
+                    additional_args, samflag, libtype, outpre, region = "", verbose = False):
     """ returns fileobject to pileup output 
     
     args:
@@ -54,10 +58,14 @@ def generate_pileup(bam, fasta, min_depth, deletion_length,
         fasta = path to fasta
         additional_args = list of additional arguments for samtools pileup
     """
-
+    
+    if libtype == "antisense": 
+      rev_flag = " -r"
+    else:
+      rev_flag = ""
     output = open(outpre + "pileup_table.tsv.gz", "w")
 
-    pileup_cmd =  "samtools view -h " + bam + " " + region + \
+    pileup_cmd =  "samtools view -h " + samflag + " " + bam + " " + region + \
                   " | filterBam -d " + str(deletion_length) + \
                   " | samtools " + \
                   "mpileup " + \
@@ -66,7 +74,7 @@ def generate_pileup(bam, fasta, min_depth, deletion_length,
                   " - " + \
                   " | " + \
                   "mpileupToReadCounts -d " + \
-                  str(min_depth) + \
+                  str(min_depth) + rev_flag + \
                   " | gzip "
                  
     if verbose:
@@ -83,7 +91,7 @@ def generate_pileup(bam, fasta, min_depth, deletion_length,
     else:
         pileup_run = subprocess.run(pileup_cmd, 
             shell=True, stderr = subprocess.PIPE, stdout = output)
-
+    
     output.close()
     return output.name
 
@@ -100,32 +108,6 @@ class Interval:
                 self.end,
                 self.count)
 
-def convert_pileup(bg, outbg):
-    """ convert pileup format to bedgraph 
-    merging adjacent intervals with the same
-    count values """ 
-    
-    ivl_cache = line_to_interval(bg.readline())
-    current_chrom = ivl_cache.chrom
-
-    for line in bg:
-        
-        ivl = line_to_interval(line)
-        
-        if ivl.chrom != current_chrom:
-            
-            outbg.write(str(ivl_cache) + "\n")
-            ivl_cache = ivl
-            current_chrom = ivl.chrom
-
-        elif ivl_cache.end == ivl.start and ivl_cache.count == ivl.count:
-            # same coverage, modify end
-            ivl_cache.end = ivl.end
-        
-        else:
-            outbg.write(str(ivl_cache) + "\n")
-            ivl_cache = ivl
-
 def line_to_interval(line):
     line = line.rstrip()
     fields = line.split("\t")
@@ -134,8 +116,74 @@ def line_to_interval(line):
                     int(fields[2]),
                     float(fields[3]))
 
-def list_to_interval(lst):
-    return Interval(lst[0], lst[1], lst[2], lst[3])
+class Pileup:
+    """ pileup object """
+    def __init__(self, chrom, pos, strand, ref_base, aux):
+        self.chrom = chrom
+        self.pos = pos
+        self.strand = strand
+        self.ref_base = ref_base
+        self.aux_fields = aux
+        
+    def __str__(self):
+        aux_out = [str(x) for x in self.aux_fields]
+        return "{}\t{}\t{}\t{}\t{}\t{}".format(self.chrom,
+                self.pos,
+                self.strand,
+                aux_out[0],
+                self.ref_base,
+                "\t".join(aux_out[1:]))
+                
+    def ivl_index(self):
+        return (self.chrom, self.pos, self.strand)
+
+def line_to_pileup(line):
+    line = line.rstrip()
+    fields = line.split("\t")
+    aux = [fields[3]] + fields[5:]
+    aux = [int(x) for x in aux]
+    return Pileup(fields[0], 
+                    int(fields[1]), 
+                    fields[2],
+                    fields[4],
+                    aux)
+
+def file_to_pileup(fn):
+    """ generator for pileup object from file """
+    for line in fn:
+        yield line_to_pileup(line)
+        
+def convert_pileup(bg, outbg):
+    """ convert pileup format to bedgraph 
+    merging adjacent intervals with the same
+    count values, probably could be cleaned up with groupby""" 
+    
+    ivl_cache = line_to_interval(bg.readline())
+    current_chrom = ivl_cache.chrom
+
+    for line in bg:
+        ivl = line_to_interval(line)
+        if ivl.chrom != current_chrom:
+            outbg.write(str(ivl_cache) + "\n")
+            ivl_cache = ivl
+            current_chrom = ivl.chrom
+        elif ivl_cache.end == ivl.start and ivl_cache.count == ivl.count:
+            # same coverage, modify end
+            ivl_cache.end = ivl.end
+        else:
+            outbg.write(str(ivl_cache) + "\n")
+            ivl_cache = ivl
+
+def gz_is_empty(fname):
+    ''' Test if gzip file fname is empty
+        Return True if the uncompressed data in fname has zero length
+        or if fname itself has zero length
+        Raises OSError if fname has non-zero length and is not a gzip file
+        https://stackoverflow.com/questions/37874936/how-to-check-empty-gzip-file-in-python
+    '''
+    with gzip.open(fname, 'rb') as f:
+        data = f.read(1)
+    return len(data) == 0
 
 def merge_bedgraphs(prefix, strand, 
                     insuffix = ".bedgraph.tmp.gz",
@@ -152,6 +200,11 @@ def merge_bedgraphs(prefix, strand,
     
     for idx, fn in enumerate(bgnames):
       outname = outnames[idx]
+      if gz_is_empty(fn):
+        print("{} is empty, no-data".format(fn), file = sys.stderr)
+        os.unlink(fn)
+        continue
+      
       with gzip.open(fn, 'rt') as f, gzip.open(outname, 'wt') as fout:
         convert_pileup(f, fout)
       os.unlink(fn)
@@ -183,49 +236,61 @@ def format_bedgraphs(df, depth, prefix):
     df_del.to_csv(prefix + "deletions.bedgraph.tmp.gz", sep = "\t", index=False, header=False, compression='gzip')
     df_depth.to_csv(prefix + "depth.bedgraph.tmp.gz", sep = "\t", index=False, header=False, compression='gzip')
 
-def parse_library_type(bam, libtype):
-    pass
-
+def parse_library_type(bam_path, strandedness, libtype):
+    """ return a list of appropriate flags for filtering bamfile 
+      returns a list with a list for each bam flag setting
+      first element is a filtering flag
+      second element is a string that indicates if the alignments are sense or antisense
+    """
     
-##    # 1. alignments of the second in pair if they map to the forward strand
-#    # 2. alignments of the first in pair if their mate maps to the forward strand
-#    
-#    samtools view -b -f 128 -F 16 $DATA > fwd1.bam
-#    samtools index fwd1.bam
-#
-#    samtools view -b -f 64 -F 32 $DATA > fwd2.bam
-#    samtools index fwd2.bam
-#    
-#    samtools merge -f fwd.bam fwd1.bam fwd2.bam
-#    samtools index fwd.bam
-#
-#    # 1. alignments of the second in pair if it maps to the reverse strand
-#    # 2. alignments of the first in pair if their mates map to the reverse strand
-#    
-#    samtools view -b -f 144 $DATA > rev1.bam
-#    samtools index rev1.bam
-#
-#    samtools view -b -f 96 $DATA > rev2.bam
-#    samtools index rev2.bam
-#
-#    samtools merge -f rev.bam rev1.bam rev2.bam
-#    samtools index rev.bam
-
+    if strandedness == "fr-firststrand":
+      if libtype == "paired":
+        ## parse out sense alignments (R2) (second in pair)
+        sam_flag_1 = "-f 128 "
+        lib_type_1 = "sense"
+        ## parse out antisense alignments (R1) (first in pair)
+        sam_flag_2 = "-f 64 "
+        lib_type_2 = "antisense"
+        
+        return [[sam_flag_1, lib_type_1], [sam_flag_2, lib_type_2]]
+        
+      else:
+        # single end
+        return [["", "antisense"]]
+        
+    elif strandedness == "fr-secondstrand":
+      if libtype == "paired":
+        ## parse out sense alignments (R1) (firsti n pair)
+        sam_flag_1 = "-f 64 "
+        lib_type_1 = "sense"
+        ## parse out antisense alignments (R2) (second in pair)
+        sam_flag_2 = "-f 128 "
+        lib_type_2 = "antisense"
+        
+        return [[sam_flag_1, lib_type_1], [sam_flag_2, lib_type_2]]
+      else:
+        # single end
+        return [["", "sense"]] 
+        
+    elif strandedness == "unstranded":
+      
+      return [["", "sense"]]
+      
+    else:
+      sys.exit("libtype specification failed")
+    
 def generate_mismatch_profile(input_bam, fasta, additional_args, depth, outpre, 
-        threads, deletion_length, debug = False):
+        threads, deletion_length, bam_flag, libtype, debug = False):
     
    if debug:
        print("started processing {}".format(str(datetime.now())),
            file = sys.stderr)
-   
-   outdir = os.path.dirname(outpre)
-   if not os.path.exists(outdir) and outdir:
-       os.makedirs(outdir)
 
    ## generate per nucleotide mismatch and indel counts
    if threads == 1:
        output = generate_pileup(input_bam, fasta, depth, 
                                 deletion_length, additional_args,
+                                bam_flag, libtype,
                                 outpre, region = "", verbose = debug)
    
    else:
@@ -241,8 +306,6 @@ def generate_mismatch_profile(input_bam, fasta, additional_args, depth, outpre,
            print("-r option is not allowed when running with multiple threads", 
                  file = sys.stderr)
        
-       
-
        pool = Pool(threads)
        
        # build function obj
@@ -252,17 +315,12 @@ def generate_mismatch_profile(input_bam, fasta, additional_args, depth, outpre,
            depth,
            deletion_length,
            additional_args, 
+           bam_flag,
+           libtype,
            verbose = debug)
-       
-       # make tmp directory
-       tmp_dir = "tmpfiles-" + str(uuid.uuid4())
-       if not os.path.exists(tmp_dir): 
-         os.makedirs(tmp_dir)
-         print("temporary files placed in directory:\n{}".format(tmp_dir),
-               file = sys.stdout)
-         
+        
        # generate prefixes that with tmp_dir and contig id
-       new_pres = [os.path.join(tmp_dir, x + "_") for x in contigs] 
+       new_pres = [os.path.join(outpre, x + "_") for x in contigs] 
        
        parallel_args = zip(new_pres, contigs)
        
@@ -292,11 +350,13 @@ def generate_mismatch_profile(input_bam, fasta, additional_args, depth, outpre,
                        output_tbl.write(line)
        
        output_tbl.close()
-
-       shutil.rmtree(tmp_dir, ignore_errors=False, onerror=None)
    
-   # parse into bedgraphs (pos and neg)
-   df = pd.read_table(output, compression = 'gzip')
+   return(output)
+
+def generate_bedgraphs(pileup_fn, depth, outpre):
+  
+   ## parse into bedgraphs (pos and neg)
+   df = pd.read_table(pileup_fn, compression = 'gzip')
    
    # parse into strand-specific bedgraphs (pos and neg)
    df_pos = df[df.strand == "+"]
@@ -308,74 +368,206 @@ def generate_mismatch_profile(input_bam, fasta, additional_args, depth, outpre,
    merge_bedgraphs(outpre, "pos_")
    merge_bedgraphs(outpre, "neg_")
    
+def merge_pileup_tables(pileup_fns, output_pileup_fn, tmp_dir, verbose = True):
+    """ sort and merge the sense and antisense pileup tables
+    samtools returns pileup format sorted by largest chromosome in 
+    descending order
+    values for duplicated intervals then can be summed in one pass
+    see https://stackoverflow.com/questions/23450145/sort-a-big-file-with-python-heapq-merge
+    """
+    
+    if verbose:
+        print("started concatenating anti-sense and sense pileup tabls",
+              file = sys.stderr)
+              
+    ## concat the pileup tables
+    out_tmp_ptable = os.path.join(tmp_dir, "_tmp_pileup_table.tsv.gz")
+    with gzip.open(out_tmp_ptable, 'wt') as out_tmp_ptable_fn:
+      for idx, pfn in enumerate(pileup_fns):
+        fn = gzip.open(pfn, 'rt')
+        header = fn.readline()
+        if idx == 0:
+          out_tmp_ptable_fn.write(header)
+        for line in fn:
+          out_tmp_ptable_fn.write(line)
+        fn.close()
+    
+    if verbose:
+        print("started sorting anti-sense and sense pileup tables",
+              file = sys.stderr)
+    
+    ## chunk into sep. files and sort in memory
+    chunk_names = []
+    with gzip.open(out_tmp_ptable, 'rt') as input_file:
+        header = input_file.readline() 
+        for chunk_number in itertools.count(1):
+            # read in next 100k lines and sort them
+            lines = itertools.islice(input_file, 100000)
+            lines = [x.split("\t") for x in lines]
+            sorted_chunk = sorted(lines, key = itemgetter(0,1,2))
+            if not sorted_chunk:
+                # end of input
+                break
+    
+            chunk_name = os.path.join(tmp_dir, 'chunk_{}.chk'.format(chunk_number))
+            chunk_names.append(chunk_name)
+            with gzip.open(chunk_name, 'wt') as chunk_file:
+                for line in sorted_chunk:
+                  chunk_file.write("\t".join(line))
+    
+    if verbose:
+        print("merging sorted tables",
+              file = sys.stderr)
+              
+    with ExitStack() as stack, gzip.open(out_tmp_ptable, 'wt') as output_file:
+        files = [stack.enter_context(gzip.open(chunk, 'rt')) for chunk in chunk_names]
+        output_file.write(header)
+        output_file.writelines(heapq.merge(*files, key = lambda x: (x.split("\t")[0], 
+                                                                    x.split("\t")[1],
+                                                                    x.split("\t")[2])))
+    for i in chunk_names:
+      os.unlink(i)
+    
+    if verbose:
+        print("summing up columns from sorted tables",
+              file = sys.stderr)
+              
+    pileup_fn = gzip.open(out_tmp_ptable, 'rt')
+    pileup_fout = gzip.open(output_pileup_fn, 'wt')
+    header = pileup_fn.readline()
+    pileup_fout.write(header)
+    
+    # group by chrom, pos, and strand and sum values
+    pileup_generator = file_to_pileup(pileup_fn)
+    for ivl, vals in itertools.groupby(pileup_generator, 
+                                       key = lambda x : x.ivl_index()):
+
+        aux_vals = []
+        for pileup in vals:
+            aux_vals.append(pileup.aux_fields)
+            base = pileup.ref_base
+        
+        if len(aux_vals) > 1:
+          summed_vals = [sum(x) for x in zip(*aux_vals)]
+        else:
+          summed_vals = aux_vals[0]
+        
+        ivl = list(ivl)
+        outline = ivl + [summed_vals[0]] + [base] + summed_vals[1:]
+        outline = [str(x) for x in outline]
+        pileup_fout.write("\t".join(outline) + "\n")
+        
+    # clean up files    
+    pileup_fn.close() 
+    os.unlink(out_tmp_ptable)
+    for f in pileup_fns:
+      os.unlink(f)
+      
 def main():
     
     parser = argparse.ArgumentParser(description="""
     Parse bam file and enumerate mismatches, insertions, and deletions per
     nucleotide. Generates bedgraphs for mismatches, insertions and
-    deletions, as well as a summary table with aggregated information""")
+    deletions, as well as a summary table with aggregated information""",
+    formatter_class = argparse.RawTextHelpFormatter )
 
     parser.add_argument('-b',
                         '--bam',
-                        help ='indexed bam file input',
+                        help ="""indexed bam file input
+                        \n""",
                         required = True)
     parser.add_argument('-f',
                         '--fasta',
-                        help = """path to fasta file indexed with samtools
-                        faidx, passed to samtools mpileup""",
+                        help = textwrap.dedent("""\
+                        path to fasta file indexed with samtools faidx, 
+                        passed to samtools mpileup
+                        \n"""),
                         required = True)
+                        
+    parser.add_argument('-L',
+                        '--library',
+                        help = """library type: either 'paired' or 'single' (default: %(default)s)
+                        \n""",
+                        required = False,
+                        default = 'single')
+                        
+    parser.add_argument('-s',
+                        '--strandedness',
+                        help = textwrap.dedent("""\
+                        strandedness of library:
+                        
+                          'fr-firststrand' = first strand sequenced as R1 (default)
+                             i.e. R1 alignments are the reverse complement of RNA, 
+                             for paired-end R2 alignments are the same sequence as the RNA
+                             
+                          'fr-secondstrand' = second strand sequenced as R1 
+                             i.e. R1 alignmnets are the same sequence as the RNA
+                             for paired-end R2 alignments are the reverse complement of the RNA
+                             
+                          'unstranded' = report strandedness without respect to R1 or R2
+                          (default: %(default)s)
+                          \n"""),
+                        required = False,
+                        default = 'fr-firststrand')
+                        
     parser.add_argument('-p',
                         '--pileup',
-                        help = """additional command line arguments
-                        to pass to samtools mpileup, by default
-                        -f is set by the --fasta argument to this script
+                        help = textwrap.dedent("""\
+                        additional command line arguments to pass to samtools mpileup 
+                        by default -f is set by the --fasta argument to this script
                         
-                        The following arguments are set by default, but can
-                        be modified.
+                        The following arguments are set by default, but can be modified.
                         --ff UNMAP,SECONDARY,QCFAIL,DUP (filter alignments)
                         -B (disable BAQ calculation) 
-                        -d 10000000 (use up to 1e7 reads per base)
-                        -L 10000000 (use up to 1e7 reads per base for indel calling)
+                        -d 1000000 (use up to 1e6 reads per base)
+                        -L 1000000 (use up to 1e6 reads per base for indel calling)
                         do not count orphan reads (paired end)
                         do not double count if paired end reads overlap
-                        """, 
+                        \n"""), 
                         required = False,
                         default = "")
     
     parser.add_argument('-d',
                         '--depth',
-                        help = """minimum read coverage required for
-                        reporting mismatch or indel frequencies. 
-                        Default = 5""", 
+                        help = textwrap.dedent("""\
+                        minimum read coverage required for
+                        reporting mismatch or indel frequencies (default: %(default)s)
+                        \n"""), 
                         required = False, 
                         default = 5, type = float)
                         
     parser.add_argument('-l',
                         '--deletion_length',
-                        help = """do not count deletions greater than or 
-                        equal to deletion_length, default = 4""",
+                        help = textwrap.dedent("""\
+                        do not count deletions greater than or equal 
+                        to deletion_length (default: %(default)s)
+                        \n"""),
+                        required = False,
                         default = 4, type = int)
                         
     parser.add_argument('-o',
                         '--outpre',
-                        help="""prefix for output files""",
+                        help="""prefix for output files
+                        \n""",
                         required = False,
                         default = "")
     
     parser.add_argument('-t',
                         '--threads',
-                        help="""Threads to use when running mpileup. If
+                        help=textwrap.dedent("""\
+                        Threads to use when running mpileup. If
                         threads is > 1 then the mpileup command will be
                         split up by chromosome to run using multiple
-                        threads
-                        default = 1""",
+                        threads (default: %(default)s)
+                        \n"""),
                         required = False,
                         default = 1,
                         type = int)
     
     parser.add_argument('-v',
                         '--verbose',
-                        help="""print run information""",
+                        help="""print run information (default: %(default)s)\n""",
+                        type = bool,
                         required = False,
                         default = False)
 
@@ -384,27 +576,92 @@ def main():
     bam_name = args.bam
 
     # ok to have repeated args in samtools command
-    pileup_args =  " -d 10000000 -L 10000000 -B " + args.pileup    
+    pileup_args =  " -d 1000000 -L 1000000 -B " + args.pileup    
     fasta_name = args.fasta
     depth = args.depth
     outpre = args.outpre
     deletion_length = args.deletion_length
     threads = args.threads
     verbose = args.verbose
+    library = args.library
+    strandedness = args.strandedness
     
+    #### check options
     if not os.path.isfile(bam_name) or not os.path.isfile(fasta_name):
         sys.exit("input bam {} or fasta {} not found".format(bam_name,
             fasta_name))
+    
+    library_opts = ['single', 'paired']
+    stranded_opts = ['fr-firststrand', 'fr-secondstrand', 'unstranded']
+    
+    if library not in library_opts:
+        mess = "unknown option for --library: {} \ntry one of: {}"
+        sys.exit(mess.format(library, ",".join(library_opts)))
+    
+    if strandedness not in stranded_opts:
+        mess = "unknown option for --strandedness: {} \ntry one of: {}"
+        sys.exit(mess.format(strandedness, ",".join(stranded_opts)))
+    
+    #### make directories
+    outdir = os.path.dirname(outpre)
+    if not os.path.exists(outdir) and outdir:
+       os.makedirs(outdir)
+       
+    ## make tmp directory
+    tmp_dir = os.path.join(outdir, "tmpfiles-" + str(uuid.uuid4()))
+    if not os.path.exists(tmp_dir): 
+      os.makedirs(tmp_dir)
+      if verbose:
+          print("temporary files placed in directory:\n{}".format(tmp_dir),
+                file = sys.stderr)
+    else:
+      sys.exit("temporary files directory already exists:\n{}".format(tmp_dir))
 
+    #### parse library type  
+    bam_flags = parse_library_type(bam_name, strandedness, library)
+    
+    ## parse bam into two new bams if paired end
+    ## one bam with all alignments that report the correct strand of the fragment
+    ## the other bam with all alignments that are rev-comp of the fragment
+    ## invert the second bam reported strands and merge
+    pileup_tbls = []
+      
+    for bam_flag in bam_flags:
+      bam_flag_filter = bam_flag[0]
+      align_type = bam_flag[1]
+      pileup_fn = os.path.join(tmp_dir, bam_flag[1])
+      if not os.path.exists(pileup_fn): 
+        os.makedirs(pileup_fn)
+        
+      pileup_tbl = generate_mismatch_profile(bam_name, 
+        fasta_name, 
+        pileup_args,
+        depth,
+        pileup_fn,
+        threads,
+        deletion_length,
+        bam_flag_filter,
+        align_type,
+        verbose) 
+      
+      pileup_tbls.append(pileup_tbl)
+        
+    output_pileup_fn = outpre + "pileup_table.tsv.gz"
+    if len(pileup_tbls) == 2:
+      # paired end
+      # merge_pileupes
+      merge_pileup_tables(pileup_tbls, output_pileup_fn, tmp_dir, verbose)
+      
+    elif len(pileup_tbls) == 1:
+      # single end
+      # just move the file
+      shutil.move(pileup_tbls[0], output_pileup_fn)
+   
+    generate_bedgraphs(output_pileup_fn, depth, outpre)
+    
+    print("removing temp directory: {}".format(tmp_dir))
+    shutil.rmtree(tmp_dir, ignore_errors=False, onerror=None)     
 
-    generate_mismatch_profile(bam_name, 
-            fasta_name, 
-            pileup_args,
-            depth,
-            outpre,
-            threads,
-            deletion_length,
-            verbose) 
                 
 if __name__ == '__main__': main()
 
