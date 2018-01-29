@@ -155,24 +155,31 @@ int find_dels(Cigar cig, int max_del = 4){
   return -1 ;
 }
 
-void check_cigar(string cigar_str, int max_del, bool &mod_seq, Cigar &new_cigar ){
+bool check_cigar(string cigar_str, int max_del, Cigar &new_cigar){
+  bool mod_seq = false; 
   Cigar cig(cigar_str) ;
+  
   if (!cig.is_aligned()) {
-    return ;
+    return mod_seq;
   }
   cig.parse_cigar() ;
   int del_op = find_dels(cig, max_del) ;
+
   if (del_op >= 0){
-    mod_seq = true ; 
+    mod_seq = true ;
     vector<int> c_lens(cig.cig_lens.begin(), cig.cig_lens.begin() + del_op) ;
     vector<char> c_ops(cig.cig_ops.begin(), cig.cig_ops.begin() + del_op) ;
     new_cigar.cig_lens = c_lens ;
     new_cigar.cig_ops = c_ops ;
     new_cigar.cigvec_to_str() ;
   }
+  
+  return mod_seq ;
 }
 
 void split_sam(string line, int max_del, bool clip_read = true){
+  // by default clip sequences at deletions for now
+  
   Samline sam ;
   stringstream ss(line);
   string flag, pos, mapq, pnext, tlen ;
@@ -202,9 +209,9 @@ void split_sam(string line, int max_del, bool clip_read = true){
   getline(ss, sam.qual, '\t') ;
   getline(ss, sam.aux) ;
   
-  bool mod_seq  = false; 
+  bool mod_seq ; 
   Cigar new_cigar ;
-  check_cigar(sam.cig, max_del, mod_seq, new_cigar) ; 
+  mod_seq = check_cigar(sam.cig, max_del, new_cigar) ; 
   
   if(mod_seq){
     if(clip_read){
