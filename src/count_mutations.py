@@ -210,7 +210,7 @@ def merge_bedgraphs(prefix, strand,
       os.unlink(fn)
     
 def format_bedgraphs(df, depth, prefix):
-
+    
     """ take pandas dataframe and generate bedgraphs """
     df = df.assign(mismatch_ratio = lambda df: df.mmcount / df.depth)
     df = df.assign(insertion_ratio = lambda df: df.inscount / df.depth)
@@ -231,10 +231,10 @@ def format_bedgraphs(df, depth, prefix):
     df_del = df_del.sort_values(['chr', 'start'], ascending=[True, True])
     df_depth = df_depth.sort_values(['chr', 'start'], ascending = [True, True])
 
-    df_mm.to_csv(prefix + "mismatches.bedgraph.tmp.gz", sep = "\t", index=False, header=False, compression='gzip')
-    df_ins.to_csv(prefix + "insertions.bedgraph.tmp.gz", sep = "\t", index=False, header=False, compression='gzip')
-    df_del.to_csv(prefix + "deletions.bedgraph.tmp.gz", sep = "\t", index=False, header=False, compression='gzip')
-    df_depth.to_csv(prefix + "depth.bedgraph.tmp.gz", sep = "\t", index=False, header=False, compression='gzip')
+    df_mm.to_csv(prefix + "mismatches.bedgraph.tmp.gz", sep = "\t", mode='a', index=False, header=False, compression='gzip')
+    df_ins.to_csv(prefix + "insertions.bedgraph.tmp.gz", sep = "\t", mode='a', index=False, header=False, compression='gzip')
+    df_del.to_csv(prefix + "deletions.bedgraph.tmp.gz", sep = "\t", mode='a', index=False, header=False, compression='gzip')
+    df_depth.to_csv(prefix + "depth.bedgraph.tmp.gz", sep = "\t", mode='a', index=False, header=False, compression='gzip')
 
 def parse_library_type(bam_path, strandedness, libtype):
     """ return a list of appropriate flags for filtering bamfile 
@@ -353,17 +353,19 @@ def generate_mismatch_profile(input_bam, fasta, additional_args, depth, outpre,
    
    return(output)
 
-def generate_bedgraphs(pileup_fn, depth, outpre):
+def generate_bedgraphs(pileup_fn, depth, outpre, threads, chunk_size = 100000):
   
    ## parse into bedgraphs (pos and neg)
-   df = pd.read_table(pileup_fn, compression = 'gzip')
+   reader = pd.read_table(pileup_fn, compression = 'gzip', chunksize = chunk_size)
+   pool = mp.Pool(threads)
    
-   # parse into strand-specific bedgraphs (pos and neg)
-   df_pos = df[df.strand == "+"]
-   df_neg = df[df.strand == "-"]
+   for df in reader:  
+       # parse into strand-specific bedgraphs (pos and neg)
+       df_pos = df[df.strand == "+"]
+       df_neg = df[df.strand == "-"]
 
-   format_bedgraphs(df_pos, depth, outpre + "pos_") 
-   format_bedgraphs(df_neg, depth, outpre + "neg_")
+       format_bedgraphs(df_pos, depth, outpre + "pos_") 
+       format_bedgraphs(df_neg, depth, outpre + "neg_")
    
    merge_bedgraphs(outpre, "pos_")
    merge_bedgraphs(outpre, "neg_")
@@ -458,7 +460,8 @@ def merge_pileup_tables(pileup_fns, output_pileup_fn, tmp_dir, verbose = True):
         pileup_fout.write("\t".join(outline) + "\n")
         
     # clean up files    
-    pileup_fn.close() 
+    pileup_fn.close()
+    pileup_fout.close()
     os.unlink(out_tmp_ptable)
     for f in pileup_fns:
       os.unlink(f)
@@ -657,7 +660,8 @@ def main():
       # just move the file
       shutil.move(pileup_tbls[0], output_pileup_fn)
    
-    generate_bedgraphs(output_pileup_fn, depth, outpre)
+    ## parse output into bedgraphs
+    generate_bedgraphs(output_pileup_fn, depth, outpre, threads)
     
     print("removing temp directory: {}".format(tmp_dir))
     shutil.rmtree(tmp_dir, ignore_errors=False, onerror=None)     
