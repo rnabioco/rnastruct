@@ -501,7 +501,7 @@ def main():
                              for paired-end R2 alignments are the same sequence as the RNA
                              
                           'fr-secondstrand' = second strand sequenced as R1 
-                             i.e. R1 alignmnets are the same sequence as the RNA
+                             i.e. R1 alignments are the same sequence as the RNA
                              for paired-end R2 alignments are the reverse complement of the RNA
                              
                           'unstranded' = report strandedness without respect to R1 or R2
@@ -521,8 +521,8 @@ def main():
                         -B (disable BAQ calculation) 
                         -d 1000000 (use up to 1e6 reads per base)
                         -L 1000000 (use up to 1e6 reads per base for indel calling)
-                        do not count orphan reads (paired end)
-                        do not double count if paired end reads overlap
+                        -A count orphan reads (paired end)
+                        -x disable read-pair overlap detection
                         \n"""), 
                         required = False,
                         default = "")
@@ -576,7 +576,7 @@ def main():
     bam_name = args.bam
 
     # ok to have repeated args in samtools command
-    pileup_args =  " -d 1000000 -L 1000000 -B " + args.pileup    
+    pileup_args =  " --count-orphans -x -d 1000000 -L 1000000 -B " + args.pileup    
     fasta_name = args.fasta
     depth = args.depth
     outpre = args.outpre
