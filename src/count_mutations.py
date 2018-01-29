@@ -10,6 +10,7 @@ import uuid
 import shutil
 import itertools
 import heapq
+import io
 import multiprocessing as mp
 from contextlib import ExitStack
 from datetime import datetime
@@ -21,7 +22,6 @@ def retrieve_header(bam):
     """
     args:
       bam = path to bam
-    
     return:
       list of contigs
     """
@@ -46,13 +46,11 @@ def retrieve_header(bam):
                         file = sys.stderr))
 
         contigs.append(contig_id)
-    
     return contigs
 
 def generate_pileup(bam, fasta, min_depth, deletion_length, 
                     additional_args, samflag, libtype, outpre, region = "", verbose = False):
     """ returns fileobject to pileup output 
-    
     args:
         bam = path to bam
         fasta = path to fasta
@@ -181,6 +179,9 @@ def gz_is_empty(fname):
         Raises OSError if fname has non-zero length and is not a gzip file
         https://stackoverflow.com/questions/37874936/how-to-check-empty-gzip-file-in-python
     '''
+    if not os.path.isfile(fname) :
+      return True
+    
     if fname.endswith(".gz"):
         with gzip.open(fname, 'rb') as f:
             data = f.read(1)
@@ -207,7 +208,7 @@ def merge_bedgraphs(prefix, strand,
       outname = outnames[idx]
       if gz_is_empty(fn):
         print("{} is empty, no-data".format(fn), file = sys.stderr)
-        os.unlink(fn)
+        if os.path.isfile(fn): os.unlink(fn)
         continue
       
       with open(fn, 'rt') as f, gzip.open(outname, 'wt') as fout:
@@ -215,13 +216,22 @@ def merge_bedgraphs(prefix, strand,
       os.unlink(fn)
 
 def write_bedgraphs(lst_dfs, lst_fns):
-    """ write bedgraphs with supplied filenames"""
+    """ write stringIO bedgraphs to supplied filenames"""
+    
     for bg in zip(lst_dfs, lst_fns):
-      bg[0].to_csv(bg[1], 
-        sep = "\t", 
-        mode = 'a', 
-        index = False, 
-        header = False)
+      with open(bg[1], 'w') as fd:
+        bg[0].seek(0)
+        shutil.copyfileobj(bg[0], fd)
+        bg[0].close()
+
+def memmap_df(df):    
+    memmap_mm = io.StringIO()
+    df.to_csv(memmap_mm, sep = "\t", index = False, header = False)
+    memmap_mm.seek(0)
+    df = io.StringIO()
+    convert_pileup(memmap_mm, df)
+    memmap_mm.close()
+    return(df)
     
 def format_bedgraphs(df, depth, prefix):
     
@@ -248,16 +258,29 @@ def format_bedgraphs(df, depth, prefix):
     df_del = df_del.sort_values(['chr', 'start'], ascending=[True, True])
     df_depth = df_depth.sort_values(['chr', 'start'], ascending = [True, True])
     
-
-    def_fnames = [
+    ## run merge intervals on memory mapped data
+    df_list = [df_mm, df_ins, df_del, df_depth]
+    df_fnames = [
       "mismatches",
       "insertions",
       "deletions",
       "depth"
     ]
-    out_fns = [prefix + x + ".bedgraph.tmp" for x in def_fnames]
     
-    return([df_mm, df_ins, df_del, df_depth], out_fns)
+    mem_mapped_dfs = []
+    mem_mapped_dfs_fnames = []
+    for idx, df in enumerate(df_list):
+        if df.empty:
+          continue
+        
+        ## convert to in-memory file and merge intervals in place
+        fobj = memmap_df(df)
+        mem_mapped_dfs.append(fobj)
+        mem_mapped_dfs_fnames.append(df_fnames[idx])
+    
+    out_fns = [prefix + x + ".bedgraph.tmp" for x in mem_mapped_dfs_fnames]
+    
+    return(mem_mapped_dfs, out_fns)
 
 def parse_library_type(bam_path, strandedness, libtype):
     """ return a list of appropriate flags for filtering bamfile 
@@ -410,8 +433,8 @@ def generate_bedgraphs(pileup_fn, depth, outpre, threads, chunk_size = 100000):
    results = pool.imap(func, reader)
    for res in results:
        write_bedgraphs(res[0], res[1])
-  
-   ## merge redundant intervals
+   
+   ## merge redundant intervals that may flank each chunk
    merge_bedgraphs(outpre, "pos_")
    merge_bedgraphs(outpre, "neg_")
    
