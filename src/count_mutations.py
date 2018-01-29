@@ -211,17 +211,23 @@ def merge_bedgraphs(prefix, strand,
         if os.path.isfile(fn): os.unlink(fn)
         continue
       
-      with open(fn, 'rt') as f, gzip.open(outname, 'wt') as fout:
-        convert_pileup(f, fout)
+      with gzip.open(outname, 'wt') as fout:
+        memmap_mm = io.StringIO()
+        df = pd.read_table(fn, header = None)
+        df = df.sort_values([0, 1], ascending=[True, True])
+        df.to_csv(memmap_mm, sep = "\t", index = False, header = False)
+        memmap_mm.seek(0)
+        convert_pileup(memmap_mm, fout)
+        memmap_mm.close()
       os.unlink(fn)
 
 def write_bedgraphs(lst_dfs, lst_fns):
     """ write stringIO bedgraphs to supplied filenames"""
     
     for bg in zip(lst_dfs, lst_fns):
-      with open(bg[1], 'w') as fd:
+      with open(bg[1], 'a') as fd:
         bg[0].seek(0)
-        shutil.copyfileobj(bg[0], fd)
+        fd.write(bg[0].getvalue())
         bg[0].close()
 
 def memmap_df(df):    
@@ -365,7 +371,7 @@ def generate_mismatch_profile(input_bam, fasta, additional_args, depth, outpre,
            libtype,
            verbose = debug)
         
-       # generate prefixes that with tmp_dir and contig id
+       # generate prefixes that begin with tmp_dir and contig id
        new_pres = [os.path.join(outpre, x + "_") for x in contigs] 
        
        parallel_args = zip(new_pres, contigs)
@@ -407,9 +413,10 @@ def split_and_apply(df, min_depth, outprefix):
     
     df_pos = df[df.strand == "+"]
     df_neg = df[df.strand == "-"]
-
+    
     bgs_pos, bgs_pos_fns = format_bedgraphs(df_pos, min_depth, outprefix + "pos_") 
     bgs_neg, bgs_neg_fns = format_bedgraphs(df_neg, min_depth, outprefix + "neg_")
+    
     
     bgs_out = bgs_pos + bgs_neg
     bgs_fns = bgs_pos_fns + bgs_neg_fns
@@ -431,6 +438,9 @@ def generate_bedgraphs(pileup_fn, depth, outpre, threads, chunk_size = 100000):
   
    ## results is a list of pandas df's and output filenames
    results = pool.imap(func, reader)
+   pool.close()
+   pool.join()
+   
    for res in results:
        write_bedgraphs(res[0], res[1])
    
