@@ -10,10 +10,10 @@ import uuid
 import shutil
 import itertools
 import heapq
+import multiprocessing as mp
 from contextlib import ExitStack
 from datetime import datetime
 from collections import Counter
-from multiprocessing import Pool
 from functools import partial
 from operator import itemgetter
 
@@ -181,12 +181,17 @@ def gz_is_empty(fname):
         Raises OSError if fname has non-zero length and is not a gzip file
         https://stackoverflow.com/questions/37874936/how-to-check-empty-gzip-file-in-python
     '''
-    with gzip.open(fname, 'rb') as f:
-        data = f.read(1)
-    return len(data) == 0
+    if fname.endswith(".gz"):
+        with gzip.open(fname, 'rb') as f:
+            data = f.read(1)
+        return len(data) == 0
+    else: 
+       with open(fname, 'r') as f:
+            data = f.read(1)
+       return len(data) == 0
 
 def merge_bedgraphs(prefix, strand, 
-                    insuffix = ".bedgraph.tmp.gz",
+                    insuffix = ".bedgraph.tmp",
                     outsuffix = ".bedgraph.gz"):
     def_fnames = [
       "mismatches",
@@ -205,13 +210,25 @@ def merge_bedgraphs(prefix, strand,
         os.unlink(fn)
         continue
       
-      with gzip.open(fn, 'rt') as f, gzip.open(outname, 'wt') as fout:
+      with open(fn, 'rt') as f, gzip.open(outname, 'wt') as fout:
         convert_pileup(f, fout)
       os.unlink(fn)
+
+def write_bedgraphs(lst_dfs, lst_fns):
+    """ write bedgraphs with supplied filenames"""
+    for bg in zip(lst_dfs, lst_fns):
+      bg[0].to_csv(bg[1], 
+        sep = "\t", 
+        mode = 'a', 
+        index = False, 
+        header = False)
     
 def format_bedgraphs(df, depth, prefix):
     
-    """ take pandas dataframe and generate bedgraphs """
+    """ take pandas dataframe and split into bedgraph dataframs
+    return list of dataframes and list of output filenames
+    pass to write bedgraphs
+    """
     df = df.assign(mismatch_ratio = lambda df: df.mmcount / df.depth)
     df = df.assign(insertion_ratio = lambda df: df.inscount / df.depth)
     df = df.assign(deletion_ratio = lambda df: df.delcount / df.depth)
@@ -230,11 +247,17 @@ def format_bedgraphs(df, depth, prefix):
     df_ins = df_ins.sort_values(['chr', 'start'], ascending=[True, True])
     df_del = df_del.sort_values(['chr', 'start'], ascending=[True, True])
     df_depth = df_depth.sort_values(['chr', 'start'], ascending = [True, True])
+    
 
-    df_mm.to_csv(prefix + "mismatches.bedgraph.tmp.gz", sep = "\t", mode='a', index=False, header=False, compression='gzip')
-    df_ins.to_csv(prefix + "insertions.bedgraph.tmp.gz", sep = "\t", mode='a', index=False, header=False, compression='gzip')
-    df_del.to_csv(prefix + "deletions.bedgraph.tmp.gz", sep = "\t", mode='a', index=False, header=False, compression='gzip')
-    df_depth.to_csv(prefix + "depth.bedgraph.tmp.gz", sep = "\t", mode='a', index=False, header=False, compression='gzip')
+    def_fnames = [
+      "mismatches",
+      "insertions",
+      "deletions",
+      "depth"
+    ]
+    out_fns = [prefix + x + ".bedgraph.tmp" for x in def_fnames]
+    
+    return([df_mm, df_ins, df_del, df_depth], out_fns)
 
 def parse_library_type(bam_path, strandedness, libtype):
     """ return a list of appropriate flags for filtering bamfile 
@@ -306,7 +329,7 @@ def generate_mismatch_profile(input_bam, fasta, additional_args, depth, outpre,
            print("-r option is not allowed when running with multiple threads", 
                  file = sys.stderr)
        
-       pool = Pool(threads)
+       pool = mp.Pool(threads)
        
        # build function obj
        func = partial(generate_pileup,
@@ -353,20 +376,42 @@ def generate_mismatch_profile(input_bam, fasta, additional_args, depth, outpre,
    
    return(output)
 
+def split_and_apply(df, min_depth, outprefix):
+    """ parse into strand-specific bedgraphs (pos and neg)
+    and return a list of bedgraph dataframes and their output filenames.
+    pass to write_bedgraph to write to disk
+    """
+    
+    df_pos = df[df.strand == "+"]
+    df_neg = df[df.strand == "-"]
+
+    bgs_pos, bgs_pos_fns = format_bedgraphs(df_pos, min_depth, outprefix + "pos_") 
+    bgs_neg, bgs_neg_fns = format_bedgraphs(df_neg, min_depth, outprefix + "neg_")
+    
+    bgs_out = bgs_pos + bgs_neg
+    bgs_fns = bgs_pos_fns + bgs_neg_fns
+    
+    return([bgs_out, bgs_fns])
+    
 def generate_bedgraphs(pileup_fn, depth, outpre, threads, chunk_size = 100000):
-  
-   ## parse into bedgraphs (pos and neg)
+   """ master function for generating bedgraphs in parallel """
+   
+   ## read in pileup table in chunks to keep memory low
    reader = pd.read_table(pileup_fn, compression = 'gzip', chunksize = chunk_size)
+   
+   ## apply multithreading if cpus available
    pool = mp.Pool(threads)
    
-   for df in reader:  
-       # parse into strand-specific bedgraphs (pos and neg)
-       df_pos = df[df.strand == "+"]
-       df_neg = df[df.strand == "-"]
-
-       format_bedgraphs(df_pos, depth, outpre + "pos_") 
-       format_bedgraphs(df_neg, depth, outpre + "neg_")
-   
+   func = partial(split_and_apply,
+            min_depth = depth,
+            outprefix = outpre)
+  
+   ## results is a list of pandas df's and output filenames
+   results = pool.imap(func, reader)
+   for res in results:
+       write_bedgraphs(res[0], res[1])
+  
+   ## merge redundant intervals
    merge_bedgraphs(outpre, "pos_")
    merge_bedgraphs(outpre, "neg_")
    
@@ -604,6 +649,9 @@ def main():
     if strandedness not in stranded_opts:
         mess = "unknown option for --strandedness: {} \ntry one of: {}"
         sys.exit(mess.format(strandedness, ",".join(stranded_opts)))
+    
+    ## keep the thread count reasonable
+    threads = min(mp.cpu_count(), threads)
     
     #### make directories
     outdir = os.path.dirname(outpre)
