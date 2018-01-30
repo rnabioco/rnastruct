@@ -218,7 +218,7 @@ def merge_bedgraphs(prefix, strand,
       with gzip.open(outname, 'wt') as fout:
         memmap_mm = io.StringIO()
         df = pd.read_table(fn, header = None)
-        df = df.sort_values([0, 1], ascending=[True, True])
+        df = df.sort_values([0, 1, 2], ascending = [True, True])
         df.to_csv(memmap_mm, sep = "\t", index = False, header = False)
         memmap_mm.seek(0)
         convert_pileup(memmap_mm, fout)
