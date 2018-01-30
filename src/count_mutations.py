@@ -154,11 +154,12 @@ def file_to_pileup(fn):
 def convert_pileup(bg, outbg):
     """ convert pileup format to bedgraph 
     merging adjacent intervals with the same
-    count values, probably could be cleaned up with groupby""" 
+    count values
+    """
     
     ivl_cache = line_to_interval(bg.readline())
     current_chrom = ivl_cache.chrom
-
+    
     for line in bg:
         ivl = line_to_interval(line)
         if ivl.chrom != current_chrom:
@@ -171,7 +172,10 @@ def convert_pileup(bg, outbg):
         else:
             outbg.write(str(ivl_cache) + "\n")
             ivl_cache = ivl
-
+            
+    ## clear out the last interval        
+    outbg.write(str(ivl_cache) + "\n")    
+    
 def gz_is_empty(fname):
     ''' Test if gzip file fname is empty
         Return True if the uncompressed data in fname has zero length
