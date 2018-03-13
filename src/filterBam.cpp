@@ -141,21 +141,27 @@ void modify_sequence(Cigar &cig,
   }
 }
 
-int find_dels(Cigar cig, int max_del = 4){
-  // return first position of cigar deletion operation in cigar vector that exceeds max del
-  int idx(0) ;
+vector<int> find_dels(Cigar cig, int max_del = 4){
+  // return positions in cigar that contain dels 
+  vector<int> idx ;
   size_t n_ops = cig.cig_ops.size() ;
-  while(idx < n_ops){
-    if(cig.cig_ops[idx] == 'D' && cig.cig_lens[idx] >= max_del) {
-      return idx ;
+  for(int i = 0; i<n_ops; ++i){
+    if(cig.cig_ops[i] == 'D' && cig.cig_lens[i] >= max_del) {
+      idx.push_back(i) ;
     }
-    ++idx ;
   }
   // if no dels found return -1
-  return -1 ;
+  if (idx.empty()){
+    idx.push_back(-1) ;
+  }
+  return idx ;
 }
 
-bool check_cigar(string cigar_str, int max_del, Cigar &new_cigar){
+bool check_cigar(string cigar_str, 
+                 int max_del, 
+                 Cigar &new_cigar,
+                 bool clip_read,
+                 bool ref_skip){
   bool mod_seq = false; 
   Cigar cig(cigar_str) ;
   
@@ -163,22 +169,35 @@ bool check_cigar(string cigar_str, int max_del, Cigar &new_cigar){
     return mod_seq;
   }
   cig.parse_cigar() ;
-  int del_op = find_dels(cig, max_del) ;
+  vector<int> del_ops = find_dels(cig, max_del) ;
 
-  if (del_op >= 0){
+  if (del_ops[0] > 0){
     mod_seq = true ;
-    vector<int> c_lens(cig.cig_lens.begin(), cig.cig_lens.begin() + del_op) ;
-    vector<char> c_ops(cig.cig_ops.begin(), cig.cig_ops.begin() + del_op) ;
-    new_cigar.cig_lens = c_lens ;
-    new_cigar.cig_ops = c_ops ;
-    new_cigar.cigvec_to_str() ;
+    if (clip_read){
+      // take first del and return clipped CIGAR
+      vector<int> c_lens(cig.cig_lens.begin(), cig.cig_lens.begin() + del_ops[0]) ;
+      vector<char> c_ops(cig.cig_ops.begin(), cig.cig_ops.begin() + del_ops[0]) ;
+      new_cigar.cig_lens = c_lens ;
+      new_cigar.cig_ops = c_ops ;
+      new_cigar.cigvec_to_str() ;
+    } else if (ref_skip) {
+      // change all dels > max_del to ref skips
+      new_cigar.cig_lens = cig.cig_lens ;
+      new_cigar.cig_ops = cig.cig_ops ;
+      for (int i = 0; i < del_ops.size(); ++i){
+        new_cigar.cig_ops[del_ops[i]] = 'N' ;
+        new_cigar.cigvec_to_str() ;
+      }
+    }
   }
   
   return mod_seq ;
 }
 
-void split_sam(string line, int max_del, bool clip_read = true){
-  // by default clip sequences at deletions for now
+void split_sam(string line, 
+               int max_del, 
+               bool clip_read,
+               bool ref_skip){
   
   Samline sam ;
   stringstream ss(line);
@@ -211,7 +230,11 @@ void split_sam(string line, int max_del, bool clip_read = true){
   
   bool mod_seq ; 
   Cigar new_cigar ;
-  mod_seq = check_cigar(sam.cig, max_del, new_cigar) ; 
+  mod_seq = check_cigar(sam.cig, 
+                        max_del, 
+                        new_cigar,
+                        clip_read,
+                        ref_skip) ; 
   
   if(mod_seq){
     if(clip_read){
@@ -223,9 +246,11 @@ void split_sam(string line, int max_del, bool clip_read = true){
       sam.cig = new_cigar.str ; 
       // report record
       cout << sam << endl ; 
+    } else if (ref_skip) {
+      sam.cig = new_cigar.str ;
+      cout << sam << endl ;
     } else {
       // drop record
-      ;
     }
   } else {
     // report unmodified record
@@ -260,6 +285,10 @@ int main(int argc, char* argv[]){
     return 1 ;
   }
   
+  // default to changing deletions to ref skips
+  bool clip_read = false ; 
+  bool ref_skip = true ;
+  
   string line ;
   getline(cin, line) ;
   while(cin) {
@@ -269,7 +298,7 @@ int main(int argc, char* argv[]){
       if (str_start == "@"){
         cout << line << endl ;
       } else {
-        split_sam(line, del_length) ;
+        split_sam(line, del_length, clip_read, ref_skip) ;
       }
       
     } catch(const std::runtime_error& e) {

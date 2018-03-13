@@ -117,7 +117,7 @@ count_mutations.py \
   -f genome.fasta 
 ```
 
-7 files will be generated:
+The following files will be generated:
 
 ```
 pileup_table.tsv.gz
