@@ -218,7 +218,7 @@ def merge_bedgraphs(prefix, strand,
       with gzip.open(outname, 'wt') as fout:
         memmap_mm = io.StringIO()
         df = pd.read_table(fn, header = None)
-        df = df.sort_values([0, 1, 2], ascending = [True, True])
+        df = df.sort_values([0, 1, 2])
         df.to_csv(memmap_mm, sep = "\t", index = False, header = False)
         memmap_mm.seek(0)
         convert_pileup(memmap_mm, fout)
@@ -247,7 +247,10 @@ def format_bedgraphs(df, depth, prefix):
     
     """ take pandas dataframe and split into bedgraph dataframs
     return list of dataframes and list of output filenames
-    pass to write bedgraphs
+    pass to write bedgraphs.
+    
+    Note use of global variable NUCS here to denote if bedgraphs should be
+    restricted to A and C bases only
     """
     df = df.assign(mismatch_ratio = lambda df: df.mmcount / df.depth)
     df = df.assign(insertion_ratio = lambda df: df.inscount / df.depth)
@@ -257,11 +260,13 @@ def format_bedgraphs(df, depth, prefix):
     df = df.rename(columns = {'pos':'end'})
 
     df = df[df.depth >= depth]
-
+    df_depth = df[['chr', 'start', 'end', 'depth']]
+    
+    df = df[df.ref_base.isin(NUCS)]
+    
     df_mm = df[['chr', 'start', 'end', 'mismatch_ratio']]
     df_ins = df[['chr', 'start', 'end', 'insertion_ratio']]
     df_del = df[['chr', 'start', 'end', 'deletion_ratio']]
-    df_depth = df[['chr', 'start', 'end', 'depth']]
 
     df_mm = df_mm.sort_values(['chr', 'start'], ascending=[True, True])
     df_ins = df_ins.sort_values(['chr', 'start'], ascending=[True, True])
@@ -420,7 +425,6 @@ def split_and_apply(df, min_depth, outprefix):
     
     bgs_pos, bgs_pos_fns = format_bedgraphs(df_pos, min_depth, outprefix + "pos_") 
     bgs_neg, bgs_neg_fns = format_bedgraphs(df_neg, min_depth, outprefix + "neg_")
-    
     
     bgs_out = bgs_pos + bgs_neg
     bgs_fns = bgs_pos_fns + bgs_neg_fns
@@ -648,7 +652,20 @@ def main():
                         required = False,
                         default = 1,
                         type = int)
-    
+                        
+    parser.add_argument('-n',
+                        '--nucleotides',
+                        help=textwrap.dedent("""\
+                        Nucleotides to use for computing
+                        mismatc and indel ratios. Provide
+                        as a string. i.e. to report 
+                        for all nucleotides. "ATCG"
+                        (default: %(default)s)
+                        \n"""),
+                        required = False,
+                        default = "AC",
+                        type = str)
+                        
     parser.add_argument('-v',
                         '--verbose',
                         help="""print run information (default: %(default)s)\n""",
@@ -669,7 +686,12 @@ def main():
     threads = args.threads
     verbose = args.verbose
     library = args.library
+    nucs = args.nucleotides
     strandedness = args.strandedness
+    
+    #### set up global
+    global NUCS
+    NUCS = list(nucs)
     
     #### check options
     if not os.path.isfile(bam_name) or not os.path.isfile(fasta_name):
