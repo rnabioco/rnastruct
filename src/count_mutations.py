@@ -243,7 +243,7 @@ def memmap_df(df):
     memmap_mm.close()
     return(df)
     
-def format_bedgraphs(df, depth, prefix):
+def format_bedgraphs(df, depth, nucs_to_keep, prefix):
     
     """ take pandas dataframe and split into bedgraph dataframs
     return list of dataframes and list of output filenames
@@ -262,7 +262,7 @@ def format_bedgraphs(df, depth, prefix):
     df = df[df.depth >= depth]
     df_depth = df[['chr', 'start', 'end', 'depth']]
     
-    df = df[df.ref_base.isin(NUCS)]
+    df = df[df.ref_base.isin(nucs_to_keep)]
     
     df_mm = df[['chr', 'start', 'end', 'mismatch_ratio']]
     df_ins = df[['chr', 'start', 'end', 'insertion_ratio']]
@@ -414,7 +414,7 @@ def generate_mismatch_profile(input_bam, fasta, additional_args, depth, outpre,
    
    return(output)
 
-def split_and_apply(df, min_depth, outprefix):
+def split_and_apply(df, min_depth, nucs_to_keep, outprefix):
     """ parse into strand-specific bedgraphs (pos and neg)
     and return a list of bedgraph dataframes and their output filenames.
     pass to write_bedgraph to write to disk
@@ -423,15 +423,15 @@ def split_and_apply(df, min_depth, outprefix):
     df_pos = df[df.strand == "+"]
     df_neg = df[df.strand == "-"]
     
-    bgs_pos, bgs_pos_fns = format_bedgraphs(df_pos, min_depth, outprefix + "pos_") 
-    bgs_neg, bgs_neg_fns = format_bedgraphs(df_neg, min_depth, outprefix + "neg_")
+    bgs_pos, bgs_pos_fns = format_bedgraphs(df_pos, min_depth, nucs_to_keep, outprefix + "pos_") 
+    bgs_neg, bgs_neg_fns = format_bedgraphs(df_neg, min_depth, nucs_to_keep, outprefix + "neg_")
     
     bgs_out = bgs_pos + bgs_neg
     bgs_fns = bgs_pos_fns + bgs_neg_fns
     
     return([bgs_out, bgs_fns])
     
-def generate_bedgraphs(pileup_fn, depth, outpre, threads, chunk_size = 100000):
+def generate_bedgraphs(pileup_fn, depth, outpre, threads, nucleotides, chunk_size = 100000):
    """ master function for generating bedgraphs in parallel """
    
    ## read in pileup table in chunks to keep memory low
@@ -442,6 +442,7 @@ def generate_bedgraphs(pileup_fn, depth, outpre, threads, chunk_size = 100000):
    
    func = partial(split_and_apply,
             min_depth = depth,
+            nucs_to_keep = nucleotides,
             outprefix = outpre)
   
    ## results is a list of pandas df's and output filenames
@@ -686,12 +687,8 @@ def main():
     threads = args.threads
     verbose = args.verbose
     library = args.library
-    nucs = args.nucleotides
+    nucleotides = args.nucleotides
     strandedness = args.strandedness
-    
-    #### set up global
-    global NUCS
-    NUCS = list(nucs)
     
     #### check options
     if not os.path.isfile(bam_name) or not os.path.isfile(fasta_name):
@@ -708,6 +705,8 @@ def main():
     if strandedness not in stranded_opts:
         mess = "unknown option for --strandedness: {} \ntry one of: {}"
         sys.exit(mess.format(strandedness, ",".join(stranded_opts)))
+    
+    nucleotides = list(nucleotides)
     
     ## keep the thread count reasonable
     threads = min(mp.cpu_count(), threads)
@@ -768,7 +767,7 @@ def main():
       shutil.move(pileup_tbls[0], output_pileup_fn)
    
     ## parse output into bedgraphs
-    generate_bedgraphs(output_pileup_fn, depth, outpre, threads)
+    generate_bedgraphs(output_pileup_fn, depth, outpre, threads, nucleotides)
     
     print("removing temp directory: {}".format(tmp_dir))
     shutil.rmtree(tmp_dir, ignore_errors=False, onerror=None)     
