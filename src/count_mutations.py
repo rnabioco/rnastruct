@@ -349,10 +349,22 @@ def generate_mismatch_profile(input_bam, fasta, additional_args, depth, outpre,
 
    ## generate per nucleotide mismatch and indel counts
    if threads == 1:
+       if "-r " in additional_args:
+           ## pass region to samtools view
+           args = additional_args.split()
+           region_idx = args.index("-r")
+           region_to_pileup = args[region_idx + 1]
+           
+           ## don't pass region through additional args
+           ## samtools mpileup wont work with regional arg (input is sam)
+           args.remove("-r")
+           args.remove(region_to_pileup)
+           additional_args = " ".join(args)
+
        output = generate_pileup(input_bam, fasta, depth, 
                                 deletion_length, additional_args,
                                 bam_flag, libtype,
-                                outpre, region = "", verbose = debug)
+                                outpre, region = region_to_pileup, verbose = debug)
    
    else:
        """ if multiple threads then run mpileup on each chromosome using
