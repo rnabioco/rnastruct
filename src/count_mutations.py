@@ -11,12 +11,26 @@ import shutil
 import itertools
 import heapq
 import io
+import resource
+import math
 import multiprocessing as mp
 from contextlib import ExitStack
 from datetime import datetime
 from collections import Counter
 from functools import partial
+from shutil import which
 from operator import itemgetter
+
+def is_tool(name):
+    """Check whether `name` is on PATH and marked as executable."""
+
+    return which(name) is not None
+
+bp_dict = {
+        "A" : "T",
+        "T" : "A",
+        "C" : "G",
+        "G" : "C"}
 
 def retrieve_header(bam):
     """
@@ -61,7 +75,15 @@ def generate_pileup(bam, fasta, min_depth, deletion_length,
       rev_flag = " -r"
     else:
       rev_flag = ""
+   
+    if region is None:
+        region = ""
+    # quote to protect strange chrom names (i.e. rRNA gi|555853|gb|U13369.1|HSU13369)
+    if not region.startswith("'") and region != "":
+        region = "'" + region + "'"
+    
     output = open(outpre + "pileup_table.tsv.gz", "w")
+    
 
     pileup_cmd =  "samtools view -h " + samflag + " " + bam + " " + region + \
                   " | filterBam -d " + str(deletion_length) + \
@@ -77,10 +99,10 @@ def generate_pileup(bam, fasta, min_depth, deletion_length,
                  
     if verbose:
 
+        print("pileup command is:\n" + pileup_cmd, file = sys.stderr)
+        
         pileup_run = subprocess.run(pileup_cmd, 
             shell=True, stderr = sys.stderr, stdout = output)
-        
-        print("pileup command is:\n" + pileup_cmd, file = sys.stderr)
         
         print("formatted pileup output is here:\n" + output.name, 
                 file = sys.stderr)
@@ -163,18 +185,18 @@ def convert_pileup(bg, outbg):
     for line in bg:
         ivl = line_to_interval(line)
         if ivl.chrom != current_chrom:
-            outbg.write(str(ivl_cache) + "\n")
+            outbg.write("{}\n".format(str(ivl_cache)))
             ivl_cache = ivl
             current_chrom = ivl.chrom
         elif ivl_cache.end == ivl.start and ivl_cache.count == ivl.count:
             # same coverage, modify end
             ivl_cache.end = ivl.end
         else:
-            outbg.write(str(ivl_cache) + "\n")
+            outbg.write("{}\n".format(str(ivl_cache)))
             ivl_cache = ivl
             
     ## clear out the last interval        
-    outbg.write(str(ivl_cache) + "\n")    
+    outbg.write("{}\n".format(str(ivl_cache)))
     
 def gz_is_empty(fname):
     ''' Test if gzip file fname is empty
@@ -202,7 +224,8 @@ def merge_bedgraphs(prefix, strand,
       "mismatches",
       "insertions",
       "deletions",
-      "depth"
+      "depth",
+      "mutations"
     ]
     
     bgnames = [prefix + strand + x + insuffix for x in def_fnames]
@@ -245,16 +268,15 @@ def memmap_df(df):
     
 def format_bedgraphs(df, depth, nucs_to_keep, prefix):
     
-    """ take pandas dataframe and split into bedgraph dataframs
+    """ take pandas dataframe and split into bedgraph dataframes
     return list of dataframes and list of output filenames
     pass to write bedgraphs.
     
-    Note use of global variable NUCS here to denote if bedgraphs should be
-    restricted to A and C bases only
     """
     df = df.assign(mismatch_ratio = lambda df: df.mmcount / df.depth)
     df = df.assign(insertion_ratio = lambda df: df.inscount / df.depth)
     df = df.assign(deletion_ratio = lambda df: df.delcount / df.depth)
+    df = df.assign(mutation_ratio = lambda df: (df.mmcount + df.delcount) / df.depth)
 
     df = df.assign(start = lambda df:df.pos - 1)
     df = df.rename(columns = {'pos':'end'})
@@ -267,19 +289,22 @@ def format_bedgraphs(df, depth, nucs_to_keep, prefix):
     df_mm = df[['chr', 'start', 'end', 'mismatch_ratio']]
     df_ins = df[['chr', 'start', 'end', 'insertion_ratio']]
     df_del = df[['chr', 'start', 'end', 'deletion_ratio']]
+    df_mut = df[['chr', 'start', 'end', 'mutation_ratio']]
 
     df_mm = df_mm.sort_values(['chr', 'start'], ascending=[True, True])
     df_ins = df_ins.sort_values(['chr', 'start'], ascending=[True, True])
     df_del = df_del.sort_values(['chr', 'start'], ascending=[True, True])
     df_depth = df_depth.sort_values(['chr', 'start'], ascending = [True, True])
-    
+    df_mut = df_mut.sort_values(['chr', 'start'], ascending = [True, True])
+
     ## run merge intervals on memory mapped data
-    df_list = [df_mm, df_ins, df_del, df_depth]
+    df_list = [df_mm, df_ins, df_del, df_depth, df_mut]
     df_fnames = [
       "mismatches",
       "insertions",
       "deletions",
-      "depth"
+      "depth",
+      "mutations"
     ]
     
     mem_mapped_dfs = []
@@ -360,7 +385,9 @@ def generate_mismatch_profile(input_bam, fasta, additional_args, depth, outpre,
            args.remove("-r")
            args.remove(region_to_pileup)
            additional_args = " ".join(args)
-
+       else:
+           region_to_pileup = None
+        
        output = generate_pileup(input_bam, fasta, depth, 
                                 deletion_length, additional_args,
                                 bam_flag, libtype,
@@ -461,14 +488,31 @@ def generate_bedgraphs(pileup_fn, depth, outpre, threads, nucleotides, chunk_siz
    results = pool.imap(func, reader)
    pool.close()
    pool.join()
-   
+   del reader
+
    for res in results:
        write_bedgraphs(res[0], res[1])
    
-   ## merge redundant intervals that may flank each chunk
-   merge_bedgraphs(outpre, "pos_")
-   merge_bedgraphs(outpre, "neg_")
-   
+
+def compute_chunks(n_lines, n_default_lines = 100000):
+    """
+    check ulimit and split lines into 
+    proper number of chunks without exceed ulimit
+    
+    make each chunk n_default_lines unless 90% of ulimit would be
+    exceeded
+    """
+
+    softlimit, hardlimit = resource.getrlimit(resource.RLIMIT_NOFILE)
+
+    n_chunk_lines = int(n_lines / int(softlimit * 0.9)) 
+    if n_chunk_lines < n_default_lines: 
+        n_chunk_lines = n_default_lines
+    
+    n_chunks = math.ceil(n_lines / n_chunk_lines)
+
+    return n_chunk_lines, n_chunks
+
 def merge_pileup_tables(pileup_fns, output_pileup_fn, tmp_dir, verbose = True):
     """ sort and merge the sense and antisense pileup tables
     samtools returns pileup format sorted by largest chromosome in 
@@ -482,19 +526,32 @@ def merge_pileup_tables(pileup_fns, output_pileup_fn, tmp_dir, verbose = True):
               file = sys.stderr)
               
     ## concat the pileup tables
-    out_tmp_ptable = os.path.join(tmp_dir, "_tmp_pileup_table.tsv.gz")
+    out_tmp_ptable = os.path.join(tmp_dir, "tmp_pileup_table.tsv.gz")
+    
+    nlines = 0
     with gzip.open(out_tmp_ptable, 'wt') as out_tmp_ptable_fn:
       for idx, pfn in enumerate(pileup_fns):
         fn = gzip.open(pfn, 'rt')
         header = fn.readline()
+        
         if idx == 0:
           out_tmp_ptable_fn.write(header)
+          nlines += 1
+        
         for line in fn:
           out_tmp_ptable_fn.write(line)
+          nlines += 1
+
         fn.close()
     
     if verbose:
         print("started sorting anti-sense and sense pileup tables",
+              file = sys.stderr)
+    
+    nlines_per_chunk, n_chunks = compute_chunks(nlines, 100000)    
+    
+    if verbose:
+        print("chunking pileup tables into {} lines in {} files".format(nlines_per_chunk, n_chunks),
               file = sys.stderr)
     
     ## chunk into sep. files and sort in memory
@@ -502,18 +559,24 @@ def merge_pileup_tables(pileup_fns, output_pileup_fn, tmp_dir, verbose = True):
     with gzip.open(out_tmp_ptable, 'rt') as input_file:
         header = input_file.readline() 
         for chunk_number in itertools.count(1):
-            # read in next 100k lines and sort them
-            lines = itertools.islice(input_file, 100000)
-            lines = [x.split("\t") for x in lines]
-            sorted_chunk = sorted(lines, key = itemgetter(0,1,2))
+            # read in next chunk of lines and sort them
+            lines = itertools.islice(input_file, nlines_per_chunk)
+            formatted_lines = []
+            for x in lines:
+                vals = x.split("\t")
+                vals[1] = int(vals[1]) # start
+                formatted_lines.append(vals)
+
+            sorted_chunk = sorted(formatted_lines, key = itemgetter(0,1,2))
             if not sorted_chunk:
                 # end of input
                 break
-    
+             
             chunk_name = os.path.join(tmp_dir, 'chunk_{}.chk'.format(chunk_number))
             chunk_names.append(chunk_name)
             with gzip.open(chunk_name, 'wt') as chunk_file:
                 for line in sorted_chunk:
+                  line[1] = str(line[1])
                   chunk_file.write("\t".join(line))
     
     if verbose:
@@ -670,7 +733,7 @@ def main():
                         '--nucleotides',
                         help=textwrap.dedent("""\
                         Nucleotides to use for computing
-                        mismatc and indel ratios. Provide
+                        mismatch and indel ratios. Provide
                         as a string. i.e. to report 
                         for all nucleotides. "ATCG"
                         (default: %(default)s)
@@ -689,6 +752,15 @@ def main():
     args = parser.parse_args()
     
     bam_name = args.bam
+    
+    ### check system exectuables
+    
+    if not is_tool("samtools"):
+        sys.exit("samtools is not in path")
+    if not is_tool("mpileupToReadCounts"):
+        sys.exit("mpileupToreadcounts is not in path, please add rnastruct/src to your PATH")
+    if not is_tool("filterBam"):
+        sys.exit("filterBam is not in path, please add rnastruct/src to your PATH")
 
     # ok to have repeated args in samtools command
     pileup_args =  " --count-orphans -x -d 1000000 -L 1000000 -B " + args.pileup    
@@ -718,8 +790,8 @@ def main():
         mess = "unknown option for --strandedness: {} \ntry one of: {}"
         sys.exit(mess.format(strandedness, ",".join(stranded_opts)))
     
-    nucleotides = list(nucleotides)
-    
+    nucleotides = [x.upper() for x in nucleotides]
+
     ## keep the thread count reasonable
     threads = min(mp.cpu_count(), threads)
     
@@ -777,9 +849,17 @@ def main():
       # single end
       # just move the file
       shutil.move(pileup_tbls[0], output_pileup_fn)
-   
+    
+    print("parsing pileup into bedgraph format", file = sys.stderr)
+
     ## parse output into bedgraphs
     generate_bedgraphs(output_pileup_fn, depth, outpre, threads, nucleotides)
+    
+    print("merging redundant bedgraph entries", file = sys.stderr)
+    
+    ## merge redundant intervals
+    merge_bedgraphs(outpre, "pos_")
+    merge_bedgraphs(outpre, "neg_")
     
     print("removing temp directory: {}".format(tmp_dir))
     shutil.rmtree(tmp_dir, ignore_errors=False, onerror=None)     

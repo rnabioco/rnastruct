@@ -334,7 +334,10 @@ geneic_regions %>%
      group_by(genes) %>% 
   summarize(n_expts = length(unique(expt))) %>% 
   count(n_expts)
+```
 
+
+```{r find_dense_intronic_regions}
 introns <- genes %>% 
     group_by(name) %>% 
     arrange(start, .by_group = T) %>% 
@@ -372,7 +375,8 @@ Find windows with at least 80% of the nucleotides with > 100 coverage
 map(dfs, 
     function(x){
       dplyr::filter(x, value > 100) %>% 
-        bed_merge(max_dist = 5, prop_greater_than_100 = sum(value > 100) / (max(end) - min(start))) %>%
+        bed_merge(max_dist = 5, 
+                  prop_greater_than_100 = sum(value > 100) / (max(end) - min(start))) %>%
         dplyr::filter(prop_greater_than_100 > .8) %>% 
         bed_sort()
 })
@@ -391,15 +395,4 @@ tx2gene <- dplyr::filter(gtf, type == "transcript") %>%
 geneic_regions <- geneic_regions %>% 
   left_join(tx2gene, by = c("genes" = "transcript_id")) %>% 
   unique()
-```
-
-
-```{bash}
-java \
-  -cp ~/Downloads/VARNAv3-93.jar fr.orsay.lri.varna.applications.VARNAcmd \
-  -sequenceDBN CGCGUUUUCGCG \
-  -structureDBN "((((....))))" \
-  -colorMap "1;1;1;1;1;0.1;2;3.5;3;6;7" \
-  -zoom 1.2 -o "out.png"
-
 ```
