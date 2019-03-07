@@ -27,4 +27,4 @@ OUTDIR="$HOME/Projects/rnastruct/data/mismatches/new_data/"
   -t 24 \
   -d 10 \
   -L 'paired' \
-  -v True
+  -v 
