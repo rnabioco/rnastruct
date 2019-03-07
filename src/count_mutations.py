@@ -745,9 +745,7 @@ def main():
     parser.add_argument('-v',
                         '--verbose',
                         help="""print run information (default: %(default)s)\n""",
-                        type = bool,
-                        required = False,
-                        default = False)
+                        action='store_true')
 
     args = parser.parse_args()
     
