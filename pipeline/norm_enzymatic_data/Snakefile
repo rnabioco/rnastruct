@@ -1,0 +1,151 @@
+shell.executable("/bin/bash")
+shell.prefix("source ~/.bash_profile; ")
+import glob
+import os
+
+''' rules to normalize enzymatic probing data ''' 
+
+configfile: "config.yaml"
+
+RAW_DATA=config["RAW_DATA"]  
+DATA = config["DATA"]
+SAMPLES = config["SAMPLES"]
+CHROMSIZES = config["CHROMSIZES"]
+CHROMS = config["CHROMS"]
+
+ASSAYS = ["total_nascent_RNA",
+          "ssRNA",
+          "dsRNA",
+          "footprint"]
+rule all:
+  input:
+    expand("{data}/data/split_bams/{samples}/{samples}_{assays}_unique.bam.{strand}.bam",
+      data = DATA, samples = SAMPLES, strand = ["fwd", "rev"], assays =
+      ASSAYS),
+    
+    expand("{data}/data/norm/{samples}/{samples}_{chroms}_{strand}.npz",
+      data = DATA, samples = SAMPLES, strand = ["fwd", "rev"], chroms = CHROMS),
+
+def _get_bg_files(wildcards):
+    
+    print(wildcards)
+    out = expand("{data}/data/norm/{samples}/{samples}_{rna_type}_{chrom}_{strand}_norm.bg", 
+                   chrom = CHROMS, 
+                   data = wildcards.data, 
+                   samples = wildcards.samples,
+                   rna_type = wildcards.rna_type,
+                   strand = wildcards.strand)
+    return(out)
+
+
+
+def _bam_fwd_strand(wildcards):
+    return(_get_bam_files(wildcards, "fwd"))
+
+def _bam_rev_strand(wildcards):
+    return(_get_bam_files(wildcards, "rev"))
+
+def _get_bam_files(wildcards, strand):
+    
+    out = expand("{data}/data/split_bams/{samples}/{samples}_{assays}_unique.bam.{strand}.bam", 
+                   data = wildcards.data, 
+                   samples = wildcards.samples,
+                   assays = ASSAYS,
+                   strand = strand)
+    return(out)
+
+def _as_bam_str_fwd(wildcards):
+  return " ".join(_bam_fwd_strand(wildcards))
+  
+def _as_bam_str_rev(wildcards):
+  return " ".join(_bam_fwd_strand(wildcards))
+
+def _as_bam_str(wildcards, strand):
+  return " ".join(_bam_fwd_strand(wildcards, strand))
+
+rule deeptools_rev_summary:
+    """
+    generate per nucleotide summaries of coverage for multiple bams
+    """
+    input:
+      _bam_rev_strand
+    output:
+      npz = "{data}/data/norm/{samples}/{samples}_{chr}_rev.npz",
+    params:
+      bam_str = _as_bam_str_rev,
+      job_name = "deeptools_norm.{samples}",
+      memory = "select[mem>50] rusage[mem=50] span[hosts=1]",
+    log:
+      "log/bamsummary/{samples}_{chr}.txt"
+    threads:
+      6
+    resources: all_threads=6
+    shell:
+      """
+      module load anaconda
+      source activate py27
+
+      multiBamSummary \
+        bins \
+        -b {params.bam_str} \
+        -bs 1 \
+        --region {wildcards.chr} \
+        -p 5 \
+        -out {output.npz} 
+      
+      """
+rule deeptools_fwd_summary:
+    """
+    generate per nucleotide summaries of coverage for multiple bams
+    """
+    input:
+      _bam_fwd_strand
+    output:
+      npz = "{data}/data/norm/{samples}/{samples}_{chr}_fwd.npz",
+    params:
+      bam_str = _as_bam_str_fwd,
+      job_name = "deeptools_norm.{samples}",
+      memory = "select[mem>50] rusage[mem=50] span[hosts=1]",
+    log:
+      "log/{samples}_bamsplit.txt"
+    threads:
+      6
+    resources: all_threads=6
+    shell:
+      """
+      module load anaconda
+      source activate py27
+
+      multiBamSummary \
+        bins \
+        -b {params.bam_str} \
+        -bs 1 \
+        --region {wildcards.chr} \
+        -p 5 \
+        -v \
+        -out {output.npz} 
+      
+      """
+
+rule split_bams:
+    """
+    split bams into alignments from forward or reverse strand
+    """
+    input:
+      os.path.join(RAW_DATA, "{samples}_{assays}_unique.bam")
+    output:
+      fwd = "{data}/data/split_bams/{samples}/{samples}_{assays}_unique.bam.fwd.bam",
+      rev = "{data}/data/split_bams/{samples}/{samples}_{assays}_unique.bam.rev.bam",
+    params:
+      outdir = "{data}/data/split_bams/{samples}/",
+      job_name = "splitbam",
+      memory = "select[mem>8] rusage[mem=8] span[hosts=1]",
+    log:
+      "log/{samples}_bamsplit.txt"
+    threads:
+      2
+    resources: all_threads=2
+    shell:
+      """
+      bash split_bams.sh {input} {params.outdir}
+      """
