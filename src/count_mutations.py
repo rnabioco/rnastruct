@@ -322,11 +322,15 @@ def format_bedgraphs(df, depth, nucs_to_keep, prefix):
     
     return(mem_mapped_dfs, out_fns)
 
-def parse_library_type(bam_path, strandedness, libtype):
+def parse_library_type(bam_path, strandedness, libtype, skip_single_ended
+        = False):
     """ return a list of appropriate flags for filtering bamfile 
       returns a list with a list for each bam flag setting
       first element is a filtering flag
       second element is a string that indicates if the alignments are sense or antisense
+      
+      if skip_single_ended, then will not count single-end alignments found
+      mixed with paired-end alignments 
     """
     
     if strandedness == "fr-firststrand":
@@ -338,8 +342,12 @@ def parse_library_type(bam_path, strandedness, libtype):
         sam_flag_2 = "-f 64 "
         lib_type_2 = "antisense"
         
-        return [[sam_flag_1, lib_type_1], [sam_flag_2, lib_type_2]]
+        output = [[sam_flag_1, lib_type_1], [sam_flag_2, lib_type_2]]
         
+        if not skip_single_ended:
+            output.append(["-F 1", "antisense"])
+        return output
+
       else:
         # single end
         return [["", "antisense"]]
@@ -353,7 +361,12 @@ def parse_library_type(bam_path, strandedness, libtype):
         sam_flag_2 = "-f 128 "
         lib_type_2 = "antisense"
         
-        return [[sam_flag_1, lib_type_1], [sam_flag_2, lib_type_2]]
+        output = [[sam_flag_1, lib_type_1], [sam_flag_2, lib_type_2]]
+        
+        if not skip_single_ended:
+            output.append(["-F 1", "sense"])
+        return output
+
       else:
         # single end
         return [["", "sense"]] 
@@ -742,10 +755,20 @@ def main():
                         default = "AC",
                         type = str)
                         
+    parser.add_argument('-ss',
+                        '--skip-single-reads',
+                        help=textwrap.dedent("""\
+                        If set, skip single end reads when encountered
+                        in a paired-end library.
+                        (default: %(default)s , single end reads are
+                        counted by default)
+                        \n"""),
+                        action = 'store_true')
+    
     parser.add_argument('-v',
                         '--verbose',
                         help="""print run information (default: %(default)s)\n""",
-                        action='store_true')
+                        action = 'store_true')
 
     args = parser.parse_args()
     
@@ -771,7 +794,8 @@ def main():
     library = args.library
     nucleotides = args.nucleotides
     strandedness = args.strandedness
-    
+    skip_singles = args.skip_single_reads
+
     #### check options
     if not os.path.isfile(bam_name) or not os.path.isfile(fasta_name):
         sys.exit("input bam {} or fasta {} not found".format(bam_name,
@@ -809,7 +833,8 @@ def main():
       sys.exit("temporary files directory already exists:\n{}".format(tmp_dir))
 
     #### parse library type  
-    bam_flags = parse_library_type(bam_name, strandedness, library)
+    bam_flags = parse_library_type(bam_name, strandedness, library,
+            skip_singles)
     
     ## parse bam into two new bams if paired end
     ## one bam with all alignments that report the correct strand of the fragment
@@ -817,10 +842,10 @@ def main():
     ## invert the second bam reported strands and merge
     pileup_tbls = []
       
-    for bam_flag in bam_flags:
+    for idx, bam_flag in enumerate(bam_flags):
       bam_flag_filter = bam_flag[0]
       align_type = bam_flag[1]
-      pileup_fn = os.path.join(tmp_dir, bam_flag[1])
+      pileup_fn = os.path.join(tmp_dir, bam_flag[1]+ "_" + str(idx))
       if not os.path.exists(pileup_fn): 
         os.makedirs(pileup_fn)
         
@@ -838,9 +863,9 @@ def main():
       pileup_tbls.append(pileup_tbl)
         
     output_pileup_fn = outpre + "pileup_table.tsv.gz"
-    if len(pileup_tbls) == 2:
+    if len(pileup_tbls) > 1:
       # paired end
-      # merge_pileupes
+      # merge_pileups
       merge_pileup_tables(pileup_tbls, output_pileup_fn, tmp_dir, verbose)
       
     elif len(pileup_tbls) == 1:
