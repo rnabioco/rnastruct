@@ -6,6 +6,7 @@ import sys
 import subprocess
 import gzip
 import pandas as pd
+import numpy as np
 import uuid 
 import shutil
 import itertools
@@ -14,6 +15,9 @@ import io
 import resource
 import math
 import multiprocessing as mp
+import pysam
+import atexit
+
 from contextlib import ExitStack
 from datetime import datetime
 from collections import Counter
@@ -21,6 +25,10 @@ from functools import partial
 from shutil import which
 from operator import itemgetter
 
+def cleanup(tmp_dir):
+    print("removing temp directory: {}".format(tmp_dir))
+    shutil.rmtree(tmp_dir, ignore_errors=False, onerror=None)     
+    
 def is_tool(name):
     """Check whether `name` is on PATH and marked as executable."""
 
@@ -78,10 +86,18 @@ def generate_pileup(bam, fasta, min_depth, deletion_length,
    
     if region is None:
         region = ""
-    # quote to protect strange chrom names (i.e. rRNA gi|555853|gb|U13369.1|HSU13369)
-    if not region.startswith("'") and region != "":
-        region = "'" + region + "'"
+
+    if not isinstance(region, list):
+       # tmp_region = []
+       # tmp_region.append(region)
+        region = [region]
+        
+    # quote to protect strange chrom names (i.e. rRNA gi|555853|gb|U13369.1|HSU13369) 
+    for idx,val in enumerate(region):
+      if not val.startswith("'") and val != "":
+        region[idx] = "'" + val + "'"
     
+    region = " ".join(region)
     output = open(outpre + "pileup_table.tsv.gz", "w")
     
 
@@ -117,24 +133,26 @@ def generate_pileup(bam, fasta, min_depth, deletion_length,
 
 class Interval:
     """ bed interval object """
-    def __init__(self, chrom, start, end, count):
+    def __init__(self, chrom, start, end, values):
         self.chrom = chrom
         self.start = start
         self.end = end
-        self.count = count
+        self.vals = values
     def __str__(self):
+        out_vals = [str(x) for x in self.vals]
         return "{}\t{}\t{}\t{}".format(self.chrom,
                 self.start,
                 self.end,
-                self.count)
+                "\t".join(out_vals))
 
 def line_to_interval(line):
     line = line.rstrip()
     fields = line.split("\t")
-    return Interval(fields[0], 
+    ivl = Interval(fields[0], 
                     int(fields[1]), 
                     int(fields[2]),
-                    float(fields[3]))
+                    [float(x) for x in fields[3:]])
+    return ivl
 
 class Pileup:
     """ pileup object """
@@ -188,7 +206,7 @@ def convert_pileup(bg, outbg):
             outbg.write("{}\n".format(str(ivl_cache)))
             ivl_cache = ivl
             current_chrom = ivl.chrom
-        elif ivl_cache.end == ivl.start and ivl_cache.count == ivl.count:
+        elif ivl_cache.end == ivl.start and ivl_cache.vals == ivl.vals:
             # same coverage, modify end
             ivl_cache.end = ivl.end
         else:
@@ -254,6 +272,7 @@ def write_bedgraphs(lst_dfs, lst_fns):
     for bg in zip(lst_dfs, lst_fns):
       with open(bg[1], 'a') as fd:
         bg[0].seek(0)
+       # print(bg[0].getvalue())
         fd.write(bg[0].getvalue())
         bg[0].close()
 
@@ -277,6 +296,8 @@ def format_bedgraphs(df, depth, nucs_to_keep, prefix):
     df = df.assign(insertion_ratio = lambda df: df.inscount / df.depth)
     df = df.assign(deletion_ratio = lambda df: df.delcount / df.depth)
     df = df.assign(mutation_ratio = lambda df: (df.mmcount + df.delcount) / df.depth)
+    df = df.assign(stderr = lambda df:
+            (np.sqrt(df.mutation_ratio) / np.sqrt(df.depth)))
 
     df = df.assign(start = lambda df:df.pos - 1)
     df = df.rename(columns = {'pos':'end'})
@@ -289,7 +310,7 @@ def format_bedgraphs(df, depth, nucs_to_keep, prefix):
     df_mm = df[['chr', 'start', 'end', 'mismatch_ratio']]
     df_ins = df[['chr', 'start', 'end', 'insertion_ratio']]
     df_del = df[['chr', 'start', 'end', 'deletion_ratio']]
-    df_mut = df[['chr', 'start', 'end', 'mutation_ratio']]
+    df_mut = df[['chr', 'start', 'end', 'mutation_ratio', 'stderr']]
 
     df_mm = df_mm.sort_values(['chr', 'start'], ascending=[True, True])
     df_ins = df_ins.sort_values(['chr', 'start'], ascending=[True, True])
@@ -377,13 +398,22 @@ def parse_library_type(bam_path, strandedness, libtype, skip_single_ended
       
     else:
       sys.exit("libtype specification failed")
-    
+
+def setdiff(lst_a, lst_b):
+    sety = set(lst_b)
+    return [x for x in lst_a if x not in sety]
+
 def generate_mismatch_profile(input_bam, fasta, additional_args, depth, outpre, 
-        threads, deletion_length, bam_flag, libtype, debug = False):
+        threads, deletion_length, bam_flag, libtype, chroms_to_exclude = None,
+        debug = False):
     
    if debug:
        print("started processing {}".format(str(datetime.now())),
            file = sys.stderr)
+
+   chroms = retrieve_header(input_bam)
+   if chroms_to_exclude is not None:
+     chroms = setdiff(chroms, chroms_to_exclude)
 
    ## generate per nucleotide mismatch and indel counts
    if threads == 1:
@@ -399,8 +429,10 @@ def generate_mismatch_profile(input_bam, fasta, additional_args, depth, outpre,
            args.remove(region_to_pileup)
            additional_args = " ".join(args)
        else:
-           region_to_pileup = None
-        
+           if chroms_to_exclude is not None:
+             region_to_pileup = chroms
+           else:
+             region_to_pileup = None
        output = generate_pileup(input_bam, fasta, depth, 
                                 deletion_length, additional_args,
                                 bam_flag, libtype,
@@ -413,7 +445,7 @@ def generate_mismatch_profile(input_bam, fasta, additional_args, depth, outpre,
        """
        
        # generate list of new regional arguments to pass in parallel
-       contigs = retrieve_header(input_bam)
+       #contigs = retrieve_header(input_bam)
        
        if "-r " in additional_args:
            print("-r option is not allowed when running with multiple threads", 
@@ -433,9 +465,9 @@ def generate_mismatch_profile(input_bam, fasta, additional_args, depth, outpre,
            verbose = debug)
         
        # generate prefixes that begin with tmp_dir and contig id
-       new_pres = [os.path.join(outpre, x + "_") for x in contigs] 
+       new_pres = [os.path.join(outpre, x + "_") for x in chroms] 
        
-       parallel_args = zip(new_pres, contigs)
+       parallel_args = zip(new_pres, chroms)
        
        ## star map will unpack the tuple and apply the args
        ## each produced filename will be returned in list
@@ -525,6 +557,26 @@ def compute_chunks(n_lines, n_default_lines = 100000):
     n_chunks = math.ceil(n_lines / n_chunk_lines)
 
     return n_chunk_lines, n_chunks
+
+def ungzip(in_fn, out_fn):
+
+    with gzip.open(in_fn, 'rb') as f_in:
+      with open(out_fn, 'wb') as f_out:
+        shutil.copyfileobj(f_in, f_out)
+    
+    os.unlink(in_fn)
+
+def bgzip(in_fn):
+    """
+    convert file to bgzipped format
+    """
+    tmp_out_fn = in_fn.replace(".gz", "")
+    out_fn = in_fn.replace(".gz", ".bgz")
+    ungzip(in_fn, tmp_out_fn)
+    pysam.tabix_compress(tmp_out_fn, out_fn, force = True)
+    os.unlink(tmp_out_fn)
+    
+    return out_fn
 
 def merge_pileup_tables(pileup_fns, output_pileup_fn, tmp_dir, verbose = True):
     """ sort and merge the sense and antisense pileup tables
@@ -764,7 +816,26 @@ def main():
                         counted by default)
                         \n"""),
                         action = 'store_true')
-    
+                        
+    parser.add_argument('-i',
+                        '--tabix-index',
+                        help=textwrap.dedent("""\
+                        If set, report mutations bedgraph 
+                        as bgzip'd and tabix indexed
+                        (default: %(default)s)
+                        \n"""),
+                        action = 'store_true')
+
+    parser.add_argument('-c',
+                        '--chroms-to-skip',
+                        help=textwrap.dedent("""\
+                        space separated list of chroms to ignore
+                        (default: %(default)s)
+                        \n"""),
+                        required = False,
+                        nargs = "+",
+                        default = None)
+
     parser.add_argument('-v',
                         '--verbose',
                         help="""print run information (default: %(default)s)\n""",
@@ -795,6 +866,7 @@ def main():
     nucleotides = args.nucleotides
     strandedness = args.strandedness
     skip_singles = args.skip_single_reads
+    chroms_to_skip = args.chroms_to_skip
 
     #### check options
     if not os.path.isfile(bam_name) or not os.path.isfile(fasta_name):
@@ -811,7 +883,7 @@ def main():
     if strandedness not in stranded_opts:
         mess = "unknown option for --strandedness: {} \ntry one of: {}"
         sys.exit(mess.format(strandedness, ",".join(stranded_opts)))
-    
+     
     nucleotides = [x.upper() for x in nucleotides]
 
     ## keep the thread count reasonable
@@ -831,6 +903,8 @@ def main():
                 file = sys.stderr)
     else:
       sys.exit("temporary files directory already exists:\n{}".format(tmp_dir))
+    ## set cleanup functions
+    atexit.register(cleanup, tmp_dir)
 
     #### parse library type  
     bam_flags = parse_library_type(bam_name, strandedness, library,
@@ -858,6 +932,7 @@ def main():
         deletion_length,
         bam_flag_filter,
         align_type,
+        chroms_to_skip,
         verbose) 
       
       pileup_tbls.append(pileup_tbl)
@@ -884,8 +959,18 @@ def main():
     merge_bedgraphs(outpre, "pos_")
     merge_bedgraphs(outpre, "neg_")
     
-    print("removing temp directory: {}".format(tmp_dir))
-    shutil.rmtree(tmp_dir, ignore_errors=False, onerror=None)     
+    ## bgzip and index if requested
+    if args.tabix_index:
+        out_pos = outpre + "pos_" + "mutations.bedgraph.gz"
+        out_neg = outpre + "neg_" + "mutations.bedgraph.gz"
+        
+        out_pos_bgzip = bgzip(out_pos)
+        out_neg_bgzip = bgzip(out_neg)
+        
+        pysam.tabix_index(out_pos_bgzip, preset = 'bed', zerobased = True,
+                force = True)
+        pysam.tabix_index(out_neg_bgzip, preset = 'bed', zerobased = True,
+                force = True)
 
                 
 if __name__ == '__main__': main()
