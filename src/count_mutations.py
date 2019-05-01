@@ -25,9 +25,11 @@ from functools import partial
 from shutil import which
 from operator import itemgetter
 
-def cleanup(tmp_dir):
-    print("removing temp directory: {}".format(tmp_dir))
-    shutil.rmtree(tmp_dir, ignore_errors=False, onerror=None)     
+def cleanup(tmp_dir, delete = True):
+    
+    if delete:
+      print("removing temp directory: {}".format(tmp_dir))
+      shutil.rmtree(tmp_dir, ignore_errors=False, onerror=None)     
     
 def is_tool(name):
     """Check whether `name` is on PATH and marked as executable."""
@@ -235,7 +237,7 @@ def gz_is_empty(fname):
             data = f.read(1)
        return len(data) == 0
 
-def merge_bedgraphs(prefix, strand, 
+def merge_bedgraphs(prefix, strand, output_dir, 
                     insuffix = ".bedgraph.tmp",
                     outsuffix = ".bedgraph.gz"):
     def_fnames = [
@@ -246,8 +248,8 @@ def merge_bedgraphs(prefix, strand,
       "mutations"
     ]
     
-    bgnames = [prefix + strand + x + insuffix for x in def_fnames]
-    outnames = [prefix + strand + x + outsuffix for x in def_fnames]
+    bgnames = [os.path.join(prefix, strand + x + insuffix) for x in def_fnames]
+    outnames = [output_dir + strand + x + outsuffix for x in def_fnames]
     
     for idx, fn in enumerate(bgnames):
       outname = outnames[idx]
@@ -272,7 +274,6 @@ def write_bedgraphs(lst_dfs, lst_fns):
     for bg in zip(lst_dfs, lst_fns):
       with open(bg[1], 'a') as fd:
         bg[0].seek(0)
-       # print(bg[0].getvalue())
         fd.write(bg[0].getvalue())
         bg[0].close()
 
@@ -327,21 +328,21 @@ def format_bedgraphs(df, depth, nucs_to_keep, prefix):
       "depth",
       "mutations"
     ]
-    
+     
     mem_mapped_dfs = []
     mem_mapped_dfs_fnames = []
-    for idx, df in enumerate(df_list):
-        if df.empty:
+    for idx, d in enumerate(df_list):
+        if d.empty:
           continue
         
         ## convert to in-memory file and merge intervals in place
-        fobj = memmap_df(df)
+        fobj = memmap_df(d)
         mem_mapped_dfs.append(fobj)
         mem_mapped_dfs_fnames.append(df_fnames[idx])
     
     out_fns = [prefix + x + ".bedgraph.tmp" for x in mem_mapped_dfs_fnames]
     
-    return(mem_mapped_dfs, out_fns)
+    return(mem_mapped_dfs, out_fns, [df], [prefix + "pileup_all.tmp"])
 
 def parse_library_type(bam_path, strandedness, libtype, skip_single_ended
         = False):
@@ -507,14 +508,22 @@ def split_and_apply(df, min_depth, nucs_to_keep, outprefix):
     df_pos = df[df.strand == "+"]
     df_neg = df[df.strand == "-"]
     
-    bgs_pos, bgs_pos_fns = format_bedgraphs(df_pos, min_depth, nucs_to_keep, outprefix + "pos_") 
-    bgs_neg, bgs_neg_fns = format_bedgraphs(df_neg, min_depth, nucs_to_keep, outprefix + "neg_")
+    bgs_pos, bgs_pos_fns, pos_pileup, pileup_fn_pos = format_bedgraphs(df_pos, min_depth, 
+            nucs_to_keep, os.path.join(outprefix, "pos_")) 
+    bgs_neg, bgs_neg_fns, neg_pileup, pileup_fn_neg = format_bedgraphs(df_neg, min_depth, 
+            nucs_to_keep, os.path.join(outprefix, "neg_"))
     
     bgs_out = bgs_pos + bgs_neg
     bgs_fns = bgs_pos_fns + bgs_neg_fns
+    pileup_dfs = pos_pileup + neg_pileup
+    pileup_fn = pileup_fn_pos + pileup_fn_neg
+    return([bgs_out, bgs_fns, pileup_dfs, pileup_fn])
     
-    return([bgs_out, bgs_fns])
-    
+def write_pileup(df, output_fn):
+    for idx,d in enumerate(df):
+      d.to_csv(output_fn[idx], mode = 'a', sep = "\t",
+              index = False)
+
 def generate_bedgraphs(pileup_fn, depth, outpre, threads, nucleotides, chunk_size = 100000):
    """ master function for generating bedgraphs in parallel """
    
@@ -534,10 +543,12 @@ def generate_bedgraphs(pileup_fn, depth, outpre, threads, nucleotides, chunk_siz
    pool.close()
    pool.join()
    del reader
+   
+   ## need to remove preexisting res[3] filenames
 
    for res in results:
        write_bedgraphs(res[0], res[1])
-   
+       write_pileup(res[2], res[3])
 
 def compute_chunks(n_lines, n_default_lines = 100000):
     """
@@ -613,7 +624,7 @@ def merge_pileup_tables(pileup_fns, output_pileup_fn, tmp_dir, verbose = True):
         print("started sorting anti-sense and sense pileup tables",
               file = sys.stderr)
     
-    nlines_per_chunk, n_chunks = compute_chunks(nlines, 100000)    
+    nlines_per_chunk, n_chunks = compute_chunks(nlines, 1000000)    
     
     if verbose:
         print("chunking pileup tables into {} lines in {} files".format(nlines_per_chunk, n_chunks),
@@ -692,7 +703,19 @@ def merge_pileup_tables(pileup_fns, output_pileup_fn, tmp_dir, verbose = True):
     os.unlink(out_tmp_ptable)
     for f in pileup_fns:
       os.unlink(f)
-      
+
+def format_tbls(fn1, fn2, outfn):
+    
+    df_pos = pd.read_table(fn1, sep = "\t")
+    df_neg = pd.read_table(fn2, sep = "\t")
+
+    df = pd.concat([df_pos, df_neg])
+    df = df.drop('start', 1)
+    df = df.rename(columns = {'end':'pos'})
+    df = df.sort_values(['chr', 'pos', 'strand'], ascending = [True, True, True])
+
+    df.to_csv(outfn, index = False, sep = "\t", compression = "gzip")
+
 def main():
     
     parser = argparse.ArgumentParser(description="""
@@ -820,7 +843,7 @@ def main():
     parser.add_argument('-i',
                         '--tabix-index',
                         help=textwrap.dedent("""\
-                        If set, report mutations bedgraph 
+                        If set, report pileup table 
                         as bgzip'd and tabix indexed
                         (default: %(default)s)
                         \n"""),
@@ -841,6 +864,11 @@ def main():
                         help="""print run information (default: %(default)s)\n""",
                         action = 'store_true')
 
+    parser.add_argument('-k',
+                        '--keep-temp-files',
+                        help="""don't delete temp files (default: %(default)s)\n""",
+                        action = 'store_false')
+    
     args = parser.parse_args()
     
     bam_name = args.bam
@@ -903,8 +931,9 @@ def main():
                 file = sys.stderr)
     else:
       sys.exit("temporary files directory already exists:\n{}".format(tmp_dir))
+    
     ## set cleanup functions
-    atexit.register(cleanup, tmp_dir)
+    atexit.register(cleanup, tmp_dir, delete = args.keep_temp_files)
 
     #### parse library type  
     bam_flags = parse_library_type(bam_name, strandedness, library,
@@ -937,7 +966,7 @@ def main():
       
       pileup_tbls.append(pileup_tbl)
         
-    output_pileup_fn = outpre + "pileup_table.tsv.gz"
+    output_pileup_fn = os.path.join(tmp_dir, "pileup_table.tsv.gz")
     if len(pileup_tbls) > 1:
       # paired end
       # merge_pileups
@@ -951,26 +980,29 @@ def main():
     print("parsing pileup into bedgraph format", file = sys.stderr)
 
     ## parse output into bedgraphs
-    generate_bedgraphs(output_pileup_fn, depth, outpre, threads, nucleotides)
+    generate_bedgraphs(output_pileup_fn, depth, tmp_dir, threads, nucleotides)
     
+    format_tbls(os.path.join(tmp_dir, "pos_pileup_all.tmp"), 
+                os.path.join(tmp_dir, "neg_pileup_all.tmp"),
+                outpre + "pileup_table.tsv.gz")
+
     print("merging redundant bedgraph entries", file = sys.stderr)
     
     ## merge redundant intervals
-    merge_bedgraphs(outpre, "pos_")
-    merge_bedgraphs(outpre, "neg_")
+    merge_bedgraphs(tmp_dir, "pos_", outpre)
+    merge_bedgraphs(tmp_dir, "neg_", outpre)
     
     ## bgzip and index if requested
     if args.tabix_index:
-        out_pos = outpre + "pos_" + "mutations.bedgraph.gz"
-        out_neg = outpre + "neg_" + "mutations.bedgraph.gz"
-        
-        out_pos_bgzip = bgzip(out_pos)
-        out_neg_bgzip = bgzip(out_neg)
-        
-        pysam.tabix_index(out_pos_bgzip, preset = 'bed', zerobased = True,
-                force = True)
-        pysam.tabix_index(out_neg_bgzip, preset = 'bed', zerobased = True,
-                force = True)
+        out_tbl = outpre + "pileup_table.tsv.gz" 
+        out_bgzip = bgzip(out_tbl)        
+        pysam.tabix_index(out_bgzip, 
+                          seq_col = 0, 
+                          start_col = 1,
+                          end_col = 1, 
+                          zerobased = False,
+                          force = True, 
+                          line_skip = 1)
 
                 
 if __name__ == '__main__': main()
