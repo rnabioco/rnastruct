@@ -237,7 +237,24 @@ def gz_is_empty(fname):
             data = f.read(1)
        return len(data) == 0
 
-def merge_bedgraphs(prefix, strand, output_dir, 
+def process_bedgraph(fn, outname):
+
+  if gz_is_empty(fn):
+    print("{} is empty, no-data".format(fn), file = sys.stderr)
+    if os.path.isfile(fn): os.unlink(fn)
+    return     
+  
+  with gzip.open(outname, 'wt', compresslevel = 6) as fout:
+    memmap_mm = io.StringIO()
+    df = pd.read_table(fn, header = None)
+    df = df.sort_values([0, 1, 2])
+    df.to_csv(memmap_mm, sep = "\t", index = False, header = False)
+    memmap_mm.seek(0)
+    convert_pileup(memmap_mm, fout)
+    memmap_mm.close()
+  os.unlink(fn)
+
+def merge_bedgraphs(prefix, strand, output_dir, threads = 1,  
                     insuffix = ".bedgraph.tmp",
                     outsuffix = ".bedgraph.gz"):
     def_fnames = [
@@ -251,22 +268,11 @@ def merge_bedgraphs(prefix, strand, output_dir,
     bgnames = [os.path.join(prefix, strand + x + insuffix) for x in def_fnames]
     outnames = [output_dir + strand + x + outsuffix for x in def_fnames]
     
-    for idx, fn in enumerate(bgnames):
-      outname = outnames[idx]
-      if gz_is_empty(fn):
-        print("{} is empty, no-data".format(fn), file = sys.stderr)
-        if os.path.isfile(fn): os.unlink(fn)
-        continue
-      
-      with gzip.open(outname, 'wt') as fout:
-        memmap_mm = io.StringIO()
-        df = pd.read_table(fn, header = None)
-        df = df.sort_values([0, 1, 2])
-        df.to_csv(memmap_mm, sep = "\t", index = False, header = False)
-        memmap_mm.seek(0)
-        convert_pileup(memmap_mm, fout)
-        memmap_mm.close()
-      os.unlink(fn)
+    pool = mp.Pool(threads)
+
+    p = pool.starmap(process_bedgraphs, zip(bgnames, outnames))
+    p.join()
+    p.close()
 
 def write_bedgraphs(lst_dfs, lst_fns):
     """ write stringIO bedgraphs to supplied filenames"""
@@ -481,19 +487,17 @@ def generate_mismatch_profile(input_bam, fasta, additional_args, depth, outpre,
        output = outpre + "pileup_table.tsv.gz"
 
        # combine gzipped per chromosome files
-       output_tbl = gzip.open(output, 'wt')
+       output_tbl = gzip.open(output, 'wt', compresslevel = 6)
        for idx, fn in enumerate(res):
            with gzip.open(fn, 'rt') as data:
 
                if idx == 0:
                    # keep header from first file
-                   for line in data:
-                       output_tbl.write(line)
+                   shutil.copyfileobj(data, output_tbl)
                else:
                    # skip header for remaining
                    data.readline()
-                   for line in data:
-                       output_tbl.write(line)
+                   shutil.copyfileobj(data, output_tbl)
        
        output_tbl.close()
    
@@ -520,11 +524,16 @@ def split_and_apply(df, min_depth, nucs_to_keep, outprefix):
     return([bgs_out, bgs_fns, pileup_dfs, pileup_fn])
     
 def write_pileup(df, output_fn):
+    
     for idx,d in enumerate(df):
-      d.to_csv(output_fn[idx], mode = 'a', sep = "\t",
-              index = False)
+      d.to_csv(output_fn[idx], 
+               mode = 'a', 
+               sep = "\t",
+               header = False, 
+               index = False)
 
-def generate_bedgraphs(pileup_fn, depth, outpre, threads, nucleotides, chunk_size = 100000):
+def generate_bedgraphs(pileup_fn, depth, outpre, threads, nucleotides,
+        chunk_size = 1000000):
    """ master function for generating bedgraphs in parallel """
    
    ## read in pileup table in chunks to keep memory low
@@ -539,14 +548,14 @@ def generate_bedgraphs(pileup_fn, depth, outpre, threads, nucleotides, chunk_siz
             outprefix = outpre)
   
    ## results is a list of pandas df's and output filenames
-   results = pool.imap(func, reader)
-   pool.close()
-   pool.join()
-   del reader
+   #results = pool.imap(func, reader)
+   #pool.close()
+   #pool.join()
+   #del reader
    
-   ## need to remove preexisting res[3] filenames
+   ## might need to check and remove preexisting res[3] filenames
 
-   for res in results:
+   for res in pool.imap(func, reader):
        write_bedgraphs(res[0], res[1])
        write_pileup(res[2], res[3])
 
@@ -589,42 +598,31 @@ def bgzip(in_fn):
     
     return out_fn
 
-def merge_pileup_tables(pileup_fns, output_pileup_fn, tmp_dir, verbose = True):
-    """ sort and merge the sense and antisense pileup tables
-    samtools returns pileup format sorted by largest chromosome in 
-    descending order
-    values for duplicated intervals then can be summed in one pass
-    see https://stackoverflow.com/questions/23450145/sort-a-big-file-with-python-heapq-merge
-    """
+def unix_sort(out_tmp_ptable, tmp_dir, threads, memory = "8G", verbose = False):
+
+    outfile = os.path.join(tmp_dir, "tmp_sorted_pileup_table.tsv.gz")
+    outfn = open(outfile, 'w')
+    sort_cmd = "gunzip -c " + out_tmp_ptable + \
+               " | sort -S " + memory + " --parallel=" + str(threads) + " -k1,1 -k2,2n -k3,3 " + \
+               " - | gzip "
     
     if verbose:
-        print("started concatenating anti-sense and sense pileup tabls",
-              file = sys.stderr)
-              
-    ## concat the pileup tables
-    out_tmp_ptable = os.path.join(tmp_dir, "tmp_pileup_table.tsv.gz")
+        print("sort command is:\n" + sort_cmd, file = sys.stderr)
     
-    nlines = 0
-    with gzip.open(out_tmp_ptable, 'wt') as out_tmp_ptable_fn:
-      for idx, pfn in enumerate(pileup_fns):
-        fn = gzip.open(pfn, 'rt')
-        header = fn.readline()
-        
-        if idx == 0:
-          out_tmp_ptable_fn.write(header)
-          nlines += 1
-        
-        for line in fn:
-          out_tmp_ptable_fn.write(line)
-          nlines += 1
+    sort_run = subprocess.run(sort_cmd, shell=True, 
+            stderr = sys.stderr,
+            stdout = outfn)
 
-        fn.close()
-    
+    outfn.close()
+    return outfile
+               
+def external_sort(out_tmp_ptable, tmp_dir, nlines, verbose = False):
+
     if verbose:
         print("started sorting anti-sense and sense pileup tables",
               file = sys.stderr)
     
-    nlines_per_chunk, n_chunks = compute_chunks(nlines, 1000000)    
+    nlines_per_chunk, n_chunks = compute_chunks(nlines, 5000000)    
     
     if verbose:
         print("chunking pileup tables into {} lines in {} files".format(nlines_per_chunk, n_chunks),
@@ -650,7 +648,7 @@ def merge_pileup_tables(pileup_fns, output_pileup_fn, tmp_dir, verbose = True):
              
             chunk_name = os.path.join(tmp_dir, 'chunk_{}.chk'.format(chunk_number))
             chunk_names.append(chunk_name)
-            with gzip.open(chunk_name, 'wt') as chunk_file:
+            with gzip.open(chunk_name, 'wt', compresslevel = 3) as chunk_file:
                 for line in sorted_chunk:
                   line[1] = str(line[1])
                   chunk_file.write("\t".join(line))
@@ -659,7 +657,7 @@ def merge_pileup_tables(pileup_fns, output_pileup_fn, tmp_dir, verbose = True):
         print("merging sorted tables",
               file = sys.stderr)
               
-    with ExitStack() as stack, gzip.open(out_tmp_ptable, 'wt') as output_file:
+    with ExitStack() as stack, gzip.open(out_tmp_ptable, 'wt', compresslevel = 6) as output_file:
         files = [stack.enter_context(gzip.open(chunk, 'rt')) for chunk in chunk_names]
         output_file.write(header)
         output_file.writelines(heapq.merge(*files, key = lambda x: (x.split("\t")[0], 
@@ -667,13 +665,45 @@ def merge_pileup_tables(pileup_fns, output_pileup_fn, tmp_dir, verbose = True):
                                                                     x.split("\t")[2])))
     for i in chunk_names:
       os.unlink(i)
+
+def merge_pileup_tables(pileup_fns, output_pileup_fn, tmp_dir, 
+        threads = 1, verbose = True):
+    """ sort and merge the sense and antisense pileup tables
+    samtools returns pileup format sorted by largest chromosome in 
+    descending order
+    values for duplicated intervals then can be summed in one pass
+    see https://stackoverflow.com/questions/23450145/sort-a-big-file-with-python-heapq-merge
+    """
     
+    if verbose:
+        print("started concatenating anti-sense and sense pileup tables",
+              file = sys.stderr)
+              
+    ## concat the pileup tables
+    out_tmp_ptable = os.path.join(tmp_dir, "tmp_pileup_table.tsv.gz")
+    
+    with gzip.open(out_tmp_ptable, 'wt', compresslevel = 6) as out_tmp_ptable_fn:
+      for idx, pfn in enumerate(pileup_fns):
+        fn = gzip.open(pfn, 'rt')
+        
+        if idx == 0:
+          shutil.copyfileobj(fn, out_tmp_ptable_fn)
+        else:
+          header = fn.readline()
+          shutil.copyfileobj(fn, out_tmp_ptable_fn)
+        
+        fn.close()
+    
+    out_tmp_sorted_ptable = unix_sort(out_tmp_ptable, tmp_dir, threads,
+            memory = "8G", verbose = verbose)
+
+    os.unlink(out_tmp_ptable) 
     if verbose:
         print("summing up columns from sorted tables",
               file = sys.stderr)
               
-    pileup_fn = gzip.open(out_tmp_ptable, 'rt')
-    pileup_fout = gzip.open(output_pileup_fn, 'wt')
+    pileup_fn = gzip.open(out_tmp_sorted_ptable, 'rt')
+    pileup_fout = gzip.open(output_pileup_fn, 'wt', compresslevel = 6)
     header = pileup_fn.readline()
     pileup_fout.write(header)
     
@@ -700,18 +730,39 @@ def merge_pileup_tables(pileup_fns, output_pileup_fn, tmp_dir, verbose = True):
     # clean up files    
     pileup_fn.close()
     pileup_fout.close()
-    os.unlink(out_tmp_ptable)
+    os.unlink(out_tmp_sorted_ptable)
     for f in pileup_fns:
       os.unlink(f)
 
+tbl_cols = [
+ "chr",
+ "pos",
+ "strand", 
+ "depth",
+ "ref_base",
+ "refcount",
+ "acount",
+ "ccount",
+ "gcount",
+ "tcount",
+ "ncount",
+ "mmcount",
+ "delcount",
+ "inscount",
+ "mismatch_ratio",
+ "insertion_ratio",
+ "deletion_ratio",
+ "mutation_ratio",
+ "stderr",
+ "start"]
+
 def format_tbls(fn1, fn2, outfn):
-    
-    df_pos = pd.read_table(fn1, sep = "\t")
-    df_neg = pd.read_table(fn2, sep = "\t")
+     
+    df_pos = pd.read_table(fn1, sep = "\t", header = None, names = tbl_cols)
+    df_neg = pd.read_table(fn2, sep = "\t", header = None, names = tbl_cols)
 
     df = pd.concat([df_pos, df_neg])
     df = df.drop('start', 1)
-    df = df.rename(columns = {'end':'pos'})
     df = df.sort_values(['chr', 'pos', 'strand'], ascending = [True, True, True])
 
     df.to_csv(outfn, index = False, sep = "\t", compression = "gzip")
@@ -970,7 +1021,7 @@ def main():
     if len(pileup_tbls) > 1:
       # paired end
       # merge_pileups
-      merge_pileup_tables(pileup_tbls, output_pileup_fn, tmp_dir, verbose)
+      merge_pileup_tables(pileup_tbls, output_pileup_fn, tmp_dir, threads, verbose)
       
     elif len(pileup_tbls) == 1:
       # single end
@@ -989,8 +1040,8 @@ def main():
     print("merging redundant bedgraph entries", file = sys.stderr)
     
     ## merge redundant intervals
-    merge_bedgraphs(tmp_dir, "pos_", outpre)
-    merge_bedgraphs(tmp_dir, "neg_", outpre)
+    merge_bedgraphs(tmp_dir, "pos_", outpre, threads)
+    merge_bedgraphs(tmp_dir, "neg_", outpre, threads)
     
     ## bgzip and index if requested
     if args.tabix_index:
