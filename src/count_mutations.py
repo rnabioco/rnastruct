@@ -17,6 +17,7 @@ import math
 import multiprocessing as mp
 import pysam
 import atexit
+import dask.dataframe as dd
 
 from contextlib import ExitStack
 from datetime import datetime
@@ -254,7 +255,7 @@ def process_bedgraph(fn, outname):
     memmap_mm.close()
   os.unlink(fn)
 
-def merge_bedgraphs(prefix, strand, output_dir, threads = 1,  
+def merge_bedgraphs(prefix, strands, output_dir, threads = 1,  
                     insuffix = ".bedgraph.tmp",
                     outsuffix = ".bedgraph.gz"):
     def_fnames = [
@@ -265,14 +266,17 @@ def merge_bedgraphs(prefix, strand, output_dir, threads = 1,
       "mutations"
     ]
     
-    bgnames = [os.path.join(prefix, strand + x + insuffix) for x in def_fnames]
-    outnames = [output_dir + strand + x + outsuffix for x in def_fnames]
+    bgnames = []
+    outnames = []
+    for strand in strands:
+       bgnames += [os.path.join(prefix, strand + x + insuffix) for x in def_fnames]
+       outnames += [output_dir + strand + x + outsuffix for x in def_fnames]
     
     pool = mp.Pool(threads)
 
-    p = pool.starmap(process_bedgraphs, zip(bgnames, outnames))
-    p.join()
-    p.close()
+    p = pool.starmap(process_bedgraph, zip(bgnames, outnames))
+    pool.close()
+    pool.join()
 
 def write_bedgraphs(lst_dfs, lst_fns):
     """ write stringIO bedgraphs to supplied filenames"""
@@ -537,7 +541,7 @@ def generate_bedgraphs(pileup_fn, depth, outpre, threads, nucleotides,
    """ master function for generating bedgraphs in parallel """
    
    ## read in pileup table in chunks to keep memory low
-   reader = pd.read_table(pileup_fn, compression = 'gzip', chunksize = chunk_size)
+   reader = pd.read_hdf(pileup_fn, chunksize = chunk_size, iterator = True)
    
    ## apply multithreading if cpus available
    pool = mp.Pool(threads)
@@ -548,10 +552,6 @@ def generate_bedgraphs(pileup_fn, depth, outpre, threads, nucleotides,
             outprefix = outpre)
   
    ## results is a list of pandas df's and output filenames
-   #results = pool.imap(func, reader)
-   #pool.close()
-   #pool.join()
-   #del reader
    
    ## might need to check and remove preexisting res[3] filenames
 
@@ -600,11 +600,11 @@ def bgzip(in_fn):
 
 def unix_sort(out_tmp_ptable, tmp_dir, threads, memory = "8G", verbose = False):
 
-    outfile = os.path.join(tmp_dir, "tmp_sorted_pileup_table.tsv.gz")
+    outfile = os.path.join(tmp_dir, "tmp_sorted_pileup_table.tsv")
     outfn = open(outfile, 'w')
     sort_cmd = "gunzip -c " + out_tmp_ptable + \
                " | sort -S " + memory + " --parallel=" + str(threads) + " -k1,1 -k2,2n -k3,3 " + \
-               " - | gzip "
+               " - "
     
     if verbose:
         print("sort command is:\n" + sort_cmd, file = sys.stderr)
@@ -701,35 +701,40 @@ def merge_pileup_tables(pileup_fns, output_pileup_fn, tmp_dir,
     if verbose:
         print("summing up columns from sorted tables",
               file = sys.stderr)
-              
-    pileup_fn = gzip.open(out_tmp_sorted_ptable, 'rt')
-    pileup_fout = gzip.open(output_pileup_fn, 'wt', compresslevel = 6)
-    header = pileup_fn.readline()
-    pileup_fout.write(header)
-    
-    # group by chrom, pos, and strand and sum values
-    pileup_generator = file_to_pileup(pileup_fn)
-    for ivl, vals in itertools.groupby(pileup_generator, 
-                                       key = lambda x : x.ivl_index()):
 
-        aux_vals = []
-        for pileup in vals:
-            aux_vals.append(pileup.aux_fields)
-            base = pileup.ref_base
-        
-        if len(aux_vals) > 1:
-          summed_vals = [sum(x) for x in zip(*aux_vals)]
-        else:
-          summed_vals = aux_vals[0]
-        
-        ivl = list(ivl)
-        outline = ivl + [summed_vals[0]] + [base] + summed_vals[1:]
-        outline = [str(x) for x in outline]
-        pileup_fout.write("\t".join(outline) + "\n")
-        
-    # clean up files    
-    pileup_fn.close()
-    pileup_fout.close()
+    df = dd.read_csv(out_tmp_sorted_ptable, sep = "\t")
+    df = df.groupby(['chr', 'pos', 'strand', 'ref_base']).sum().compute(num_workers = threads)
+    df = df.reset_index()
+    df.to_hdf(output_pileup_fn, 'df', format = 'table')
+
+#    pileup_fn = gzip.open(out_tmp_sorted_ptable, 'rt')
+#    pileup_fout = gzip.open(output_pileup_fn, 'wt', compresslevel = 6)
+#    header = pileup_fn.readline()
+#    pileup_fout.write(header)
+#    
+#    # group by chrom, pos, and strand and sum values
+#    pileup_generator = file_to_pileup(pileup_fn)
+#    for ivl, vals in itertools.groupby(pileup_generator, 
+#                                       key = lambda x : x.ivl_index()):
+#
+#        aux_vals = []
+#        for pileup in vals:
+#            aux_vals.append(pileup.aux_fields)
+#            base = pileup.ref_base
+#        
+#        if len(aux_vals) > 1:
+#          summed_vals = [sum(x) for x in zip(*aux_vals)]
+#        else:
+#          summed_vals = aux_vals[0]
+#        
+#        ivl = list(ivl)
+#        outline = ivl + [summed_vals[0]] + [base] + summed_vals[1:]
+#        outline = [str(x) for x in outline]
+#        pileup_fout.write("\t".join(outline) + "\n")
+#        
+#    # clean up files    
+#    pileup_fn.close()
+#    pileup_fout.close()
     os.unlink(out_tmp_sorted_ptable)
     for f in pileup_fns:
       os.unlink(f)
@@ -1017,7 +1022,7 @@ def main():
       
       pileup_tbls.append(pileup_tbl)
         
-    output_pileup_fn = os.path.join(tmp_dir, "pileup_table.tsv.gz")
+    output_pileup_fn = os.path.join(tmp_dir, "pileup_table.hd5")
     if len(pileup_tbls) > 1:
       # paired end
       # merge_pileups
@@ -1040,8 +1045,7 @@ def main():
     print("merging redundant bedgraph entries", file = sys.stderr)
     
     ## merge redundant intervals
-    merge_bedgraphs(tmp_dir, "pos_", outpre, threads)
-    merge_bedgraphs(tmp_dir, "neg_", outpre, threads)
+    merge_bedgraphs(tmp_dir, ["pos_", "neg_"], outpre, threads)
     
     ## bgzip and index if requested
     if args.tabix_index:
