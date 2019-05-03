@@ -15,11 +15,47 @@ def parse_bed(fh):
         if len(fields) < 3:
             continue 
 
-        fields = fields[0:4]
         fields[1] = int(fields[1])
         fields[2] = int(fields[2])
         yield fields
 
+revcomp = {
+        "A" : "T",
+        "T" : "A",
+        "G" : "C",
+        "C" : "G",
+        "N" : "N"}
+
+class Mapfile:
+    
+    def __init__(self, nt):
+        self.mm = -999.0
+        self.se = 0.0
+        self.nt = nt
+    
+    def __str__(self):
+        return "{}\t{}\t{}".format(self.mm, self.se, self.nt)
+
+class Structpileup:
+
+    def __init__(self, string):
+        vals = string.split()
+        self.chr = vals[0]
+        self.pos = int(vals[1])
+        self.strand = vals[2]
+        self.ref_base = vals[3]
+        self.depth = int(vals[4])
+        self.refcount = int(vals[5])
+        self.mm = float(vals[17])
+        self.se = float(vals[18])
+    
+    def __str__(self):
+        return "{}\t{}\t{}\t{}\t{}\t{}".format(self.chr, 
+                                        self.pos,
+                                        self.ref_base,
+                                        self.strand,
+                                        self.mm,
+                                        self.se)
 def main():
     
     parser = argparse.ArgumentParser(description="""
@@ -27,44 +63,70 @@ def main():
     """,
     formatter_class = argparse.RawTextHelpFormatter )
 
-    parser.add_argument('-b',
-                        '--bedgraph',
-                        help ="""bedgraph
+    parser.add_argument('-t',
+                        '--tabix-file',
+                        help ="""tabix indexed pileup file
                         \n""",
                         required = True)
+
     parser.add_argument('-g',
                         '--gene_bed',
                         help = textwrap.dedent("""\
-                        bedfile with transcript coordinates to convert
+                        bedfile with transcript coordinates to convert to
+                        map (zero-based intervals)
+                        \n"""),
+                        required = True)
+    
+    parser.add_argument('-f',
+                        '--fasta',
+                        help = textwrap.dedent("""\
+                        fasta file, needed to fill in nucleotides from
+                        regions without enough depth to be present in
+                        pileup table
                         \n"""),
                         required = True)
 
     args = parser.parse_args() 
     
-    bedgraph_fh = open(args.bedgraph)
+    gene_fn = open(args.gene_bed)
     
-    tbx = pysam.TabixFile(args.gene_bed)
+    tbx = pysam.TabixFile(args.tabix_file)
     output_dir = "tmp"
     if not os.path.exists(output_dir):
       os.makedirs(output_dir)
 
-    for tx in parse_bed(bedgraph_fh):
-        print(tx)
+    fa_fh = pysam.FastaFile(args.fasta)
+    
+    for tx in parse_bed(gene_fn):
         fout = open(os.path.join(output_dir, tx[3] + "_coverage.map"), 'w')
-        for row in tbx.fetch(tx[0], tx[1], tx[2], parser=pysam.asBed()):
-            print(row)
-            new_start = max(row.start - tx[1], 1) 
-            new_end = min(row.end - tx[1], tx[2] - tx[1] + 1)
+        
+        d = {}
+
+        #get nucleotides from fasta
+        seqs = fa_fh.fetch(tx[0], tx[1], tx[2])
+        seqs = seqs.upper()
+        
+        if tx[5] == "-":
+            seqs = [revcomp[x] for x in seqs]
+        
+        for idx,nt in enumerate(seqs, 1):
+            d[idx] = Mapfile(nt)
+        
+        for row in tbx.fetch(tx[0], tx[1], tx[2]):
             
-            if new_start >= new_end:
-                print("something is wrong with row " + str(row))
-            
-            aux_fields = [str(x) for x in row[3:]]
-            fout.write("\t".join([tx[3], 
-                                  str(new_start), 
-                                  str(new_end),
-                                  "\t".join(aux_fields)]) + "\n")
-        fout.close()
+            vals = Structpileup(row)
+
+            if vals.strand != tx[5]:
+              continue
+          
+            new_start = max(vals.pos - tx[1], 1) 
+
+            d[new_start].mm = vals.mm
+            d[new_start].se = vals.se
+            d[new_start].nt = vals.ref_base
+
+        for key,val in d.items():
+           fout.write(str(key) + "\t" + str(val) + "\n")
  
 if __name__ == '__main__': main()
 
