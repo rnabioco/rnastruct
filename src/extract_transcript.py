@@ -86,15 +86,24 @@ def main():
                         \n"""),
                         required = True)
 
+    parser.add_argument('-o',
+                        '--outdir',
+                        help = textwrap.dedent("""\
+                        output directory for map files
+                        \n"""),
+                        required = False,
+                        default = "./")
+
     args = parser.parse_args() 
     
     gene_fn = open(args.gene_bed)
     
     tbx = pysam.TabixFile(args.tabix_file)
-    output_dir = "tmp"
+    output_dir = args.outdir
+
     if not os.path.exists(output_dir):
       os.makedirs(output_dir)
-
+   
     fa_fh = pysam.FastaFile(args.fasta)
     
     for tx in parse_bed(gene_fn):
@@ -106,7 +115,14 @@ def main():
         seqs = fa_fh.fetch(tx[0], tx[1], tx[2])
         seqs = seqs.upper()
         
-        if tx[5] == "-":
+        has_strand = False
+        if len(tx) >= 6:
+            if tx[5] in ["+", "-"]:
+                has_strand = True
+            else:
+                print("unrecognized character in column 6, expecting + or - \n ignoring strand", file = sys.stderr)
+
+        if has_strand and tx[5] == "-":
             seqs = [revcomp[x] for x in seqs]
         
         for idx,nt in enumerate(seqs, 1):
@@ -116,9 +132,14 @@ def main():
             
             vals = Structpileup(row)
 
-            if vals.strand != tx[5]:
+            if has_strand and vals.strand != tx[5]:
               continue
           
+            # ignore - pileup features if no strandedness requested from
+            # interval
+            if not has_strand and vals.strand == "-":
+              continue
+
             new_start = max(vals.pos - tx[1], 1) 
 
             d[new_start].mm = vals.mm
