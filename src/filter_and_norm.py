@@ -12,6 +12,7 @@ import pandas as pd
 import numpy as np
 import shutil
 import subprocess
+import functools
 
 from extract_transcript import Structpileup
 from count_mutations import bgzip
@@ -84,7 +85,7 @@ def calc_global_norm(x):
     # based on shapemapper approach, use either outlier or top 10% of
     # data, whichever removes the fewest points
 
-    q = sum(x < high_cutoff)
+    q = sum(x >= high_cutoff)
     ten_percent = sum(x > np.quantile(x, 0.90))
     
     if (q <= ten_percent):
@@ -136,6 +137,27 @@ def remove_untreated(t_path, ut_path, contig, depth, outfile):
     out.to_csv(outfile,
             sep = "\t", index = False,  compression = "gzip")
     return outfile
+
+
+def split_files(contig, t_fn, ut_fn, outdir, header):
+    
+    t_tbx = pysam.TabixFile(t_fn)
+    u_tbx = pysam.TabixFile(ut_fn)
+   
+    print("splitting ", contig)  
+    with gzip.open(os.path.join(outdir, "t_" + contig + ".tsv.gz"), 'wt', compresslevel = 6) as f:
+      f.write(header)  
+      for ivl in t_tbx.fetch(reference = contig):
+         f.write(ivl + "\n")
+    
+    with gzip.open(os.path.join(outdir, "ut_"+ contig + ".tsv.gz"), 'wt', compresslevel = 6) as f:
+      f.write(header)  
+      for ivl in u_tbx.fetch(reference = contig):
+         f.write(ivl + "\n")
+    t_tbx.close()
+    u_tbx.close()
+
+    return True
 
 def main():
     
@@ -221,19 +243,20 @@ def main():
     
     # split into per chrom files
     
-    #for contig in contigs:
-    #  print("processing ", contig)  
-    #  with gzip.open(os.path.join(tmp_dir, "t_" + contig + ".tsv.gz"), 'wt', compresslevel = 6) as f:
-    #    f.write(hdr)  
-    #    for ivl in t_tbx.fetch(reference = contig):
-    #       f.write(ivl + "\n")
-    #  
-    #  with gzip.open(os.path.join(tmp_dir, "ut_"+ contig + ".tsv.gz"), 'wt', compresslevel = 6) as f:
-    #    f.write(hdr)  
-    #    for ivl in u_tbx.fetch(reference = contig):
-    #       f.write(ivl + "\n")
+    t_tbx_fn = args.treated_tabix_file
+    ut_tbx_fn = args.untreated_tabix_file
     
-    # operate in parallel
+    func = functools.partial(split_files,
+                             t_fn = t_tbx_fn,
+                             ut_fn = ut_tbx_fn,
+                             outdir = tmp_dir,
+                             header = hdr)
+
+
+    with mp.Pool(thread_count) as p:
+        chunked_files = p.map(func, contigs)
+
+    # operate over each contig df in parallel
     t_contig_files = [os.path.join(tmp_dir, "t_" + contig + ".tsv.gz") for
             contig in contigs]
     ut_contig_files = [os.path.join(tmp_dir, "ut_" + contig + ".tsv.gz")
