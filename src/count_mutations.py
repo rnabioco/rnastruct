@@ -18,6 +18,7 @@ import multiprocessing as mp
 import pysam
 import atexit
 import dask.dataframe as dd
+import binascii
 
 from contextlib import ExitStack
 from datetime import datetime
@@ -237,6 +238,10 @@ def gz_is_empty(fname):
        with open(fname, 'r') as f:
             data = f.read(1)
        return len(data) == 0
+
+def is_gz_file(filepath):
+    with open(filepath, 'rb') as test_f:
+        return binascii.hexlify(test_f.read(2)) == b'1f8b'
 
 def process_bedgraph(fn, outname):
 
@@ -590,9 +595,14 @@ def bgzip(in_fn):
     """
     convert file to bgzipped format
     """
-    tmp_out_fn = in_fn.replace(".gz", "")
-    out_fn = in_fn.replace(".gz", ".bgz")
-    ungzip(in_fn, tmp_out_fn)
+    if is_gz_file(in_fn):
+      tmp_out_fn = in_fn.replace(".gz", "")
+      out_fn = in_fn.replace(".gz", ".bgz")
+      ungzip(in_fn, tmp_out_fn)
+    else:
+      tmp_out_fn = in_fn
+      out_fn = in_fn + ".bgz"
+    
     pysam.tabix_compress(tmp_out_fn, out_fn, force = True)
     os.unlink(tmp_out_fn)
     
@@ -743,8 +753,8 @@ tbl_cols = [
  "chr",
  "pos",
  "strand", 
- "depth",
  "ref_base",
+ "depth",
  "refcount",
  "acount",
  "ccount",
