@@ -7,7 +7,6 @@ import pysam
 import math
 import gzip 
 import multiprocessing as mp
-import uuid
 import pandas as pd
 import numpy as np
 import shutil
@@ -226,7 +225,6 @@ def main():
       hdr = f.readline()
       f.seek(0)
  
-    #tmp_dir = os.path.join(outdir, "tmpfiles-" + str(uuid.uuid4()))
     tmp_dir = args.outdir
     if not os.path.exists(tmp_dir):
        os.makedirs(tmp_dir)
@@ -245,6 +243,7 @@ def main():
     
     t_tbx_fn = args.treated_tabix_file
     ut_tbx_fn = args.untreated_tabix_file
+    
     
     func = functools.partial(split_files,
                              t_fn = t_tbx_fn,
@@ -306,7 +305,14 @@ def main():
                       force = True,
                       line_skip = 1)
 
-    os.unlink(output)
- 
+    # cleanup
+    debug = False
+    if not debug:
+        os.unlink(output)
+        
+        tmpfiles = contig_files + t_contig_files + ut_contig_files
+        for fn in tmpfiles:
+            os.unlink(fn)
+
 if __name__ == '__main__': main()
 
