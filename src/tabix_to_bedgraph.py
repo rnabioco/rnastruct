@@ -135,7 +135,7 @@ def main():
     
     in_fn = args.input_table
 
-    cols = [x - 1 for x in args.cols] 
+    cols = [int(x) - 1 for x in args.cols] 
     in_fh = gzip.open(in_fn, 'rt')
     
     convert_tabix_to_bg(in_fh, cols, args.strand, sys.stdout, header = args.noheader)
