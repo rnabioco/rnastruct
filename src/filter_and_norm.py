@@ -124,6 +124,9 @@ def remove_untreated(t_path, ut_path, contig, depth, outfile):
 
     # drop ivls with high mutation rate in untreated 
     out = out[out['mutation_ratio_ut'] < 0.02]
+    
+    # drop ivls with high modification rate in treated 
+    out = out[out['mutation_ratio'] < 0.10]
     out = out.reset_index(drop=True)
     
     out["mutation_ratio_bg_sub"] = out["mutation_ratio"] - out["mutation_ratio_ut"]
