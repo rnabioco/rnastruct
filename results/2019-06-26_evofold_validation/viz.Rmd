@@ -1,0 +1,108 @@
+---
+title: "rRNA visualization"
+author: "Kent Riemondy RBI"
+date: "3/27/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(message = FALSE)
+knitr::opts_chunk$set(cache = TRUE)
+```
+
+```{r libs}
+source("../../R/constants.R")
+```
+
+```{r varna_location}
+Sys.setenv(VARNA = "/Users/kriemo/Downloads/VARNAv3-93.jar")
+```
+
+```{r test_data}
+read_db <- function(fn, ...){
+  x <- read_lines(fn, skip = 1, ...)
+  tibble(seq = x[1],
+         ss = x[2])
+}
+
+read_map <- function(fn){
+  x <- read_tsv(fn, 
+         col_names = c("idx", "react", "stderr", "nuc"),
+         col_types = c("iddc"))
+  x
+}
+
+ids <- c("1043570.7_0_-_85", "1382689_0_+_119", "1502833_0_+_75", "1504905_1_+_168", 
+"1938044_0_-_85", "2045284_0_-_95", "2535029_0_+_65", "2557669.5_0_+_80", 
+"590889.3_0_+_80", "950396_0_-_62", "974077_0_+_116")
+
+to_plot <- 7
+
+db_file <- "evofold_coverage/all_nucs/slop_10/100_mapfiles/results_1043570.7_0_-_85_coverage.map_6add/merged_1043570.7_0_-_85_coverage.map_6add.db"
+map_file <-  paste0("evofold_coverage/all_nucs/slop_10/100_mapfiles/", ids[to_plot] , "_coverage.map")
+n_cut <- 11
+
+ref_fn <- "evofold_coverage/evofold.bed"
+ref <- read_tsv(ref_fn, col_names = FALSE) 
+ss <- filter(ref, X4 == ids[to_plot]) %>% pull(X8) 
+  
+a <- read_map(map_file) %>% 
+  pull(react) %>% 
+  .[n_cut:(length(.) - n_cut)]
+
+r <- read_map(map_file) %>% 
+  pull(react) %>% 
+  .[n_cut:(length(.) - n_cut)] 
+
+r[r == "-999"] <- 0.0
+r <- (r * 10) 
+mr <- max(r, 0.0) %>% signif(1)
+
+r <- str_c(r, collapse = ";") 
+
+n <- read_map(map_file) %>% 
+  pull(nuc) %>% 
+  .[n_cut:(length(.) - n_cut + 1)] %>% 
+  str_c(., collapse = "") 
+  
+# d <- read_db(db_file) %>% 
+#   mutate(seq =str_sub(seq, n_cut,-n_cut),
+#          ss = str_sub(ss, n_cut,-n_cut))
+
+Sys.setenv(SEQ = n)
+Sys.setenv(STRUCT = ss)
+Sys.setenv(REACT = r)
+Sys.setenv(ID = ids[to_plot])
+Sys.setenv(MAX = mr)
+nchar(ss)
+nchar(n)
+```
+
+```{bash}
+
+echo $SEQ
+echo $STRUCT
+echo $REACT
+echo $MAX
+
+java \
+  -cp $VARNA fr.orsay.lri.varna.applications.VARNAcmd \
+  -sequenceDBN $SEQ \
+  -structureDBN $STRUCT \
+  -colorMap $REACT \
+  -colorMapMax $MAX \
+  -zoom 1 \
+  -resolution "5.0" \
+  -algorithm naview \
+  -o $ID".jpeg"
+```
+
+```{r}
+knitr::include_graphics(paste0(ids[to_plot], ".jpeg"))
+```

@@ -78,8 +78,8 @@ class Structpileup:
         self.mmratio = float(vals[14])
         self.insratio = float(vals[15])
         self.delratio = float(vals[16])
-        self.mm = float(vals[17])
-        self.se = float(vals[18])
+        self.mm = float(vals[23])
+        self.se = float(vals[24])
  
     def __str__(self):
         return "\t".join([str(x) for x in vars(self).values()])

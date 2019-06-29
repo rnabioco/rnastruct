@@ -1,0 +1,345 @@
+---
+title: "Evofold validation"
+author: "Kent Riemondy RBI"
+date: "6/26/2019"
+output: html_document
+---
+
+
+```{r libs}
+source("../../R/constants.R")
+
+folding_dir <- "evofold_coverage/slop_10/"
+
+outdir <- "plots/A_C_only/"
+dir.create(outdir, recursive = TRUE)
+
+depths <- c("10", "50", "100")
+
+dp_dirs <- file.path(folding_dir, 
+          paste0(depths, "_mapfiles"))
+
+names(dp_dirs) <- depths
+
+# no_dms_dp_dirs <- file.path(folding_dir, 
+#           paste0(depths, "_mapfiles"),
+#           "no_dms")
+
+all_files <- map(dp_dirs,
+                  function(x){
+  dp_files <- dir(x, pattern = ".db",
+                  recursive = TRUE, full.names = TRUE)
+  
+  names(dp_files) <- dp_files %>%
+    basename() %>%
+    str_remove("merged_") %>%
+    str_remove("coverage.map") %>%
+    str_split(coll("__"), simplify = TRUE) %>%
+    .[, 1]
+
+  dp_dms_files <- dp_files[!str_detect(dp_files, "no_dms")]
+
+  dp_no_dms_files <- dp_files[str_detect(dp_files, "no_dms")]
+  
+  list(dms = dp_dms_files,
+       no_dms = dp_no_dms_files)
+})
+```
+
+
+```{r}
+read_dp <- function(fn, ...){
+  x <- read_lines(fn, skip = 1, ...)
+  tibble(seq = x[1],
+         ss = x[2])
+}
+
+
+comp_ss <- function(x, y){
+  if(!y %in% c("(", ")")){
+    return(0L)
+  } else if (x == y){
+    return(1L)
+  } else {
+    return(0L)
+  }
+}
+vcomp_ss <- Vectorize(comp_ss)
+```
+
+```{r}
+ref_files <- file.path(folding_dir, paste0(depths, "_cutoff.txt"))
+refs <- map(ref_files, read_tsv, 
+            col_names = c("chrom",
+                          "start",
+                          "end",
+                          "id",
+                          "score",
+                          "strand",
+                          "size",
+                          "ss",
+                          "confidence",
+                          "n_coverage"))
+
+n_slop <- 10
+
+all_dat <- pmap(list(all_files, refs),
+     function(fns, ref){
+  n_cut <- n_slop + 1
+  dat <- map_dfr(fns$dms, read_dp, .id = "id")
+  
+  merged_dat <- left_join(dat, ref, by = "id")
+  
+  slim_dat <- merged_dat %>%
+    select(pred = ss.x,
+           ref = ss.y,
+           size,
+           score,
+           id) %>%
+    mutate(pred = str_sub(pred, n_cut,-n_cut))
+  
+  dms_dat <- mutate(
+    slim_dat,
+    n_bp_ref = str_count(ref, "\\(|\\)"),
+    n_bp_pred = str_count(pred, "\\(|\\)"),
+    n_matched_bp = map2_int(str_split(pred, ""),
+                            str_split(ref, ""),
+                            function(x, y)
+                              sum(vcomp_ss(x, y))),
+    sen = n_matched_bp / n_bp_ref,
+    ppv = n_matched_bp / n_bp_pred
+  )
+  
+  dat <- map_dfr(fns$no_dms, read_dp, .id = "id")
+  merged_dat <- left_join(dat, ref, by = "id")
+  
+  slim_dat <- merged_dat %>%
+    select(pred = ss.x,
+           ref = ss.y,
+           size,
+           score, 
+           id) %>%
+    mutate(pred = str_sub(pred, n_cut,-n_cut))
+  
+  no_dms_dat <- mutate(
+    slim_dat,
+    n_bp_ref = str_count(ref, "\\(|\\)"),
+    n_bp_pred = str_count(pred, "\\(|\\)"),
+    n_matched_bp = map2_int(str_split(pred, ""),
+                            str_split(ref, ""),
+                            function(x, y)
+                              sum(vcomp_ss(x, y))),
+    sen = n_matched_bp / n_bp_ref,
+    ppv = n_matched_bp / n_bp_pred
+  )
+  bind_rows(list(
+    dms = dms_dat,
+    no_dms = no_dms_dat
+  ), .id = "treatment")
+})
+
+all_dat <- bind_rows(all_dat, .id = "depth")
+       
+
+
+```
+
+```{r size_dist}
+p_size <- ggplot(all_dat %>% filter(treatment == "no_dms"), aes(size) ) +
+  geom_histogram(bins = 50) + 
+  labs(x = "Evofold region size")
+
+p_score <-  ggplot(all_dat %>% filter(treatment == "no_dms"), aes(score) ) +
+  geom_histogram(bins = 50) + 
+  labs(x = "Evofold region score")
+
+p <- plot_grid(p_size, p_score, nrow = 1, ncol = 2)
+save_plot(
+    file.path(outdir, "evofold_distribution.pdf"),
+    p,
+    nrow = 1,
+    ncol = 2,
+    base_asp = 0.75
+  )
+p
+```
+
+```{r, all_no_filter}
+
+
+plt_dat <- all_dat
+
+plt_dat <- mutate(plt_dat, 
+                  depth = factor(depth, 
+                        levels = sort(as.numeric(unique(depth)))),
+         treatment = ifelse(treatment == "dms",
+                            "DMS",
+                            "Untreated") %>% 
+           factor(., levels = c("Untreated", "DMS")))
+
+
+
+plot_sen_ppv <- function(plt_dat, out_name, outdir, facet_by = NULL) {
+  
+  if(is.null(facet_by)){
+  p_sen <- ggplot(plt_dat,
+                  aes(depth, sen)) +
+    geom_violin(aes(fill = treatment)) +
+    geom_boxplot(aes(fill = treatment),
+                 alpha = 0.75,
+                 position = position_dodge(0.9)) +
+    scale_fill_brewer(palette = "Set1",
+                      name = "") +
+    labs(x = "Nucleotide Depth",
+         y = "Sensitivity") +
+    theme_cowplot() +
+    theme(legend.position = "top")
+  
+  
+  p_ppv <- ggplot(plt_dat,
+                  aes(depth, ppv)) +
+    geom_violin(aes(fill = treatment)) +
+    geom_boxplot(aes(fill = treatment),
+                 alpha = 0.75,
+                 position = position_dodge(0.9)) +
+    scale_fill_brewer(palette = "Set1",
+                      name = "") +
+    labs(x = "Nucleotide Depth",
+         y = "P.P.V") +
+    theme_cowplot() +
+    theme(legend.position = "top")
+  } else {
+    
+    
+    rename_facet <- paste0("n = ", as.character(as.vector(table(plt_dat$level))))
+   names(rename_facet) <- unique(plt_dat$level)
+
+      p_sen <- ggplot(plt_dat,
+                  aes(depth, sen)) +
+    geom_violin(aes(fill = treatment)) +
+    geom_boxplot(aes(fill = treatment),
+                 alpha = 0.75,
+                 position = position_dodge(0.9)) +
+    facet_wrap(as.formula(paste("~ ", facet_by)), 
+               labeller = as_labeller(rename_facet)) + 
+    scale_fill_brewer(palette = "Set1",
+                      name = "") +
+    labs(x = "Nucleotide Depth",
+         y = "Sensitivity") +
+    theme_cowplot() +
+    theme(legend.position = "top")
+  
+  
+  p_ppv <- ggplot(plt_dat,
+                  aes(depth, ppv)) +
+    geom_violin(aes(fill = treatment)) +
+    geom_boxplot(aes(fill = treatment),
+                 alpha = 0.75,
+                 position = position_dodge(0.9)) +
+    facet_wrap(as.formula(paste("~ ", facet_by)),
+               labeller = as_labeller(rename_facet)) + 
+    scale_fill_brewer(palette = "Set1",
+                      name = "") +
+    labs(x = "Nucleotide Depth",
+         y = "P.P.V") +
+    theme_cowplot() +
+    theme(legend.position = "top")
+  }
+  p <- plot_grid(p_sen, p_ppv, nrow = 1, ncol = 2)
+  p
+  
+  
+  save_plot(
+    file.path(outdir, out_name),
+    p,
+    nrow = 1,
+    ncol = 2,
+    base_asp = 1.2
+  )
+  p
+}
+
+plot_sen_ppv(plt_dat, "s_ppv_no_filtering.pdf", outdir)
+```
+
+
+```{r, all_no_filter}
+
+not_perfectly_predicted <- all_dat %>%
+  filter(treatment == "no_dms") %>% 
+  filter(sen < 0.75 | ppv < 0.75) %>% 
+  pull(id) %>% 
+  unique()
+
+plt_dat <- filter(all_dat, id %in% not_perfectly_predicted)
+
+plt_dat <- mutate(plt_dat, 
+                  depth = factor(depth, 
+                        levels = sort(as.numeric(unique(depth)))),
+         treatment = ifelse(treatment == "dms",
+                            "DMS",
+                            "Untreated") %>% 
+           factor(., levels = c("Untreated", "DMS")))
+
+plot_sen_ppv(plt_dat, "s_ppv_filtering.pdf", outdir)
+
+```
+
+```{r, cutbyscore}
+
+not_perfectly_predicted <- all_dat %>%
+  filter(treatment == "no_dms") %>% 
+  filter(sen < 0.75 | ppv < 0.75) %>% 
+  pull(id) %>% 
+  unique()
+
+plt_dat <- filter(all_dat, id %in% not_perfectly_predicted)
+
+plt_dat <- group_by(plt_dat,
+                    depth) %>% 
+   mutate(level = cut(score, 
+                     quantile(score), 
+                     include.lowest = TRUE, 
+                     right = FALSE, 
+                     labels = FALSE)) %>% 
+  ungroup() %>% 
+  mutate(depth = factor(depth, 
+                        levels = sort(as.numeric(unique(depth)))),
+         treatment = ifelse(treatment == "dms",
+                            "DMS",
+                            "Untreated") %>% 
+           factor(., levels = c("Untreated", "DMS")))
+
+plot_sen_ppv(plt_dat, "s_ppv_filtering_cut_score.pdf", outdir, facet_by = "level")
+
+```
+
+
+```{r}
+not_perfectly_predicted <- all_dat %>%
+  filter(treatment == "no_dms") %>% 
+  filter(sen < 0.75 | ppv < 0.75) %>% 
+  pull(id) %>% 
+  unique()
+
+plt_dat <- filter(all_dat, id %in% not_perfectly_predicted)
+
+plt_dat <- group_by(plt_dat,
+                    depth) %>% 
+  mutate(level = cut(size, 
+                     quantile(size), 
+                     include.lowest = TRUE, 
+                     right = FALSE, 
+                     labels = FALSE)) %>% 
+  ungroup() %>% 
+  mutate(depth = factor(depth, 
+                        levels = sort(as.numeric(unique(depth)))),
+         treatment = ifelse(treatment == "dms",
+                            "DMS",
+                            "Untreated") %>% 
+           factor(., levels = c("Untreated", "DMS")))
+
+
+plot_sen_ppv(plt_dat, "s_ppv_filtering_cut_size.pdf", outdir, facet_by = "level")
+
+```
