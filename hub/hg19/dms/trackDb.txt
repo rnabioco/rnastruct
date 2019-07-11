@@ -1,0 +1,143 @@
+
+track DMS_Reactivity
+superTrack on show
+shortLabel DMS_reactivity 
+longLabel Normalized DMS reactivity 
+
+    track dms_bigwigs
+    parent DMS_Reactivity 
+    compositeTrack on show
+    shortLabel DMS_reactivity_bigwigs 
+    longLabel DMS reactivitity scores
+    type bigWig
+    autoScale on
+    windowingFunction mean
+    visibility hide 
+    maxHeightPixels 100:30:8
+    subGroup1 polII PolII WT=Wild_type C4=Slow_Mutant 
+    subGroup2 norm Normalization_method norm=Global       bgsub=Background_subtracted raw=unnormalized 
+    subGroup3 strand Strand pos=Positive neg=Negative
+    dimensions dimX=polII dimY=norm dimA=strand
+    dimensionXchecked Wild_type
+    sortOrder strand=- polII=-
+
+track WT_neg_dms_bgsub
+parent dms_bigwigs
+shortLabel WT_neg_dms_bgsub
+bigDataUrl http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/dms/WT_neg_dms_bgsub.bw
+longLabel  WT_neg_dms_bgsub
+subGroups polII=WT norm=bgsub strand=neg
+maxHeightPixels 30:30:10
+color 255,0,0
+type bigWig
+
+track WT_neg_dms_norm
+parent dms_bigwigs
+shortLabel WT_neg_dms_norm
+bigDataUrl http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/dms/WT_neg_dms_norm.bw
+longLabel  WT_neg_dms_norm
+subGroups polII=WT norm=norm strand=neg
+maxHeightPixels 30:30:10
+color 255,0,0
+type bigWig
+
+track WT_neg_dms_raw
+parent dms_bigwigs
+shortLabel WT_neg_dms_raw
+bigDataUrl http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/dms/WT_neg_dms_raw.bw
+longLabel  WT_neg_dms_raw
+subGroups polII=WT norm=raw strand=neg
+maxHeightPixels 30:30:10
+color 255,0,0
+type bigWig
+
+track WT_pos_dms_bgsub
+parent dms_bigwigs
+shortLabel WT_pos_dms_bgsub
+bigDataUrl http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/dms/WT_pos_dms_bgsub.bw
+longLabel  WT_pos_dms_bgsub
+subGroups polII=WT norm=bgsub strand=pos
+maxHeightPixels 30:30:10
+color 255,0,0
+type bigWig
+
+track WT_pos_dms_norm
+parent dms_bigwigs
+shortLabel WT_pos_dms_norm
+bigDataUrl http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/dms/WT_pos_dms_norm.bw
+longLabel  WT_pos_dms_norm
+subGroups polII=WT norm=norm strand=pos
+maxHeightPixels 30:30:10
+color 255,0,0
+type bigWig
+
+track WT_pos_dms_raw
+parent dms_bigwigs
+shortLabel WT_pos_dms_raw
+bigDataUrl http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/dms/WT_pos_dms_raw.bw
+longLabel  WT_pos_dms_raw
+subGroups polII=WT norm=raw strand=pos
+maxHeightPixels 30:30:10
+color 255,0,0
+type bigWig
+
+track C4_neg_dms_bgsub
+parent dms_bigwigs
+shortLabel C4_neg_dms_bgsub
+bigDataUrl http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/dms/C4_neg_dms_bgsub.bw
+longLabel  C4_neg_dms_bgsub
+subGroups polII=C4 norm=bgsub strand=neg
+maxHeightPixels 30:30:10
+color 67,205,128
+type bigWig
+
+track C4_neg_dms_norm
+parent dms_bigwigs
+shortLabel C4_neg_dms_norm
+bigDataUrl http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/dms/C4_neg_dms_norm.bw
+longLabel  C4_neg_dms_norm
+subGroups polII=C4 norm=norm strand=neg
+maxHeightPixels 30:30:10
+color 67,205,128
+type bigWig
+
+track C4_neg_dms_raw
+parent dms_bigwigs
+shortLabel C4_neg_dms_raw
+bigDataUrl http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/dms/C4_neg_dms_raw.bw
+longLabel  C4_neg_dms_raw
+subGroups polII=C4 norm=raw strand=neg
+maxHeightPixels 30:30:10
+color 67,205,128
+type bigWig
+
+track C4_pos_dms_bgsub
+parent dms_bigwigs
+shortLabel C4_pos_dms_bgsub
+bigDataUrl http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/dms/C4_pos_dms_bgsub.bw
+longLabel  C4_pos_dms_bgsub
+subGroups polII=C4 norm=bgsub strand=pos
+maxHeightPixels 30:30:10
+color 67,205,128
+type bigWig
+
+track C4_pos_dms_norm
+parent dms_bigwigs
+shortLabel C4_pos_dms_norm
+bigDataUrl http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/dms/C4_pos_dms_norm.bw
+longLabel  C4_pos_dms_norm
+subGroups polII=C4 norm=norm strand=pos
+maxHeightPixels 30:30:10
+color 67,205,128
+type bigWig
+
+track C4_pos_dms_raw
+parent dms_bigwigs
+shortLabel C4_pos_dms_raw
+bigDataUrl http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/dms/C4_pos_dms_raw.bw
+longLabel  C4_pos_dms_raw
+subGroups polII=C4 norm=raw strand=pos
+maxHeightPixels 30:30:10
+color 67,205,128
+type bigWig
+

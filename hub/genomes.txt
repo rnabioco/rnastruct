@@ -1,0 +1,2 @@
+genome hg19
+trackDb http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/trackDb.txt

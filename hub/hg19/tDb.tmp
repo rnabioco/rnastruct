@@ -1,0 +1,95 @@
+track evoFam
+bigDataUrl http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/evofam/evofam_hg19.bb 
+shortLabel EvoFam
+longLabel EvoFam predictions 
+type bigBed 6 +
+labelOnFeature on
+labelFields secStr
+color 0,0,255
+
+track footprints 
+compositeTrack on
+shortLabel Protein Footprints
+longLabel protein association footprints
+visibility full 
+priority 1
+transformFunc LOG
+type bigWig 5 11 
+autoScale on
+viewLimits 1:11
+
+    track wtFootprint
+    parent footprints on
+    bigDataUrl http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/footprint/WT_footprint_sorted_expressed_10.bw
+    shortLabel protein_footprints_wt
+    longLabel wild type protein footprints
+    autoScale on
+    maxHeightPixels 100:30:8
+    type bigWig
+    
+    track slowFootprint
+    parent footprints on
+    bigDataUrl http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/footprint/C4_footprint_sorted_expressed_10.bw
+    shortLabel protein_footprints_slow
+    autoScale on
+    maxHeightPixels 100:30:8
+    longLabel slow mutant protein footprints
+    type bigWig
+
+
+track nascent_coverage 
+superTrack on show
+shortLabel Nascent RNA
+longLabel Nascent RNA-seq coverage
+
+    track WT_coverage 
+    parent nascent_coverage
+    container multiWig
+    shortLabel WildType
+    longLabel WT nascent rna seq 
+    visibility full 
+    maxHeightPixels 100:30:8
+    autoscale on
+    aggregate transparentOverlay
+    type bigWig  
+  
+        track WT_plus
+        bigDataUrl http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/coverage/WTpos_depth.bb
+        shortLabel WT_plus_strand
+        longLabel WT plus strand
+        parent WT_coverage
+        type bigWig
+        
+        track WT_negative
+        bigDataUrl http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/coverage/WTneg_depth.bb
+        shortLabel WT_neg_strand
+        longLabel WT negative strand
+        parent WT_coverage
+        type bigWig
+    
+    
+    track C4_coverage 
+    parent nascent_coverage
+    container multiWig
+    shortLabel Slow
+    longLabel Slow nascent rna seq 
+    maxHeightPixels 100:30:8
+    visibility full 
+    aggregate transparentOverlay
+    autoscale on
+    type bigWig 
+    
+        track C4_plus
+        bigDataUrl http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/coverage/C4pos_depth.bb
+        shortLabel C4_plus_strand
+        longLabel C4 plus strand
+        parent C4_coverage
+        type bigWig
+        
+        track C4_negative
+        bigDataUrl http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/coverage/C4neg_depth.bb
+        shortLabel C4_neg_strand
+        longLabel C4 negative strand
+        parent C4_coverage
+        type bigWig
+  

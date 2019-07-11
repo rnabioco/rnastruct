@@ -1,0 +1,6 @@
+hub rnastruct
+shortLabel NascentRNAstructure 
+longLabel Nascent RNA structural probing 
+genomesFile genomes.txt
+email kent.riemondy@cuanschutz.edu
+
