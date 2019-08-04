@@ -1,14 +1,46 @@
 
-RAW_DATA: "../../data/enzymatic_data/"
-DATA: "norm_data"
-SAMPLES: 
-    - "slow_mut"
-    - "wild_type"
+RAW_DATA: "../../data/bams/july2019/enzymatic_probing"
+DATA: "../../data/enzymatic_data_july2019/"
 
-CHROMSIZES: "../chroms.txt"
+SAMPLES: 
+    - "WT"
+    - "Slow"
+
+#dictionary:
+#       key = one of total_nascent_rna, ssRNA, dsRNA
+#       value = matching prefix for related bam file
+#
+#    i.e
+#
+#    WT_single_stranded.bam
+#
+#    sample = WT
+#
+#    Sample_type key = "ssRNA"
+#    sample_type value = "single_stranded"
+
+SAMPLE_MAP:
+    total_nascent_RNA: "total_nascent"
+    ssRNA: "single_stranded"
+    dsRNA: "double_stranded"
+
+LIB_MAP:
+    total_nascent_RNA: "fr-firststrand"
+    ssRNA: "fr-secondstrand"
+    dsRNA: "fr-secondstrand"
+
+CHROMSIZES: "chroms.txt"
 
 CHROMS:
     - chr1
+    - chr2
+    - chr3
+    - chr4
+    - chr5
+    - chr6
+    - chr7
+    - chr8
+    - chr9
     - chr10
     - chr11
     - chr12
@@ -19,16 +51,11 @@ CHROMS:
     - chr17
     - chr18
     - chr19
-    - chr2
     - chr20
     - chr21
     - chr22
-    - chr3
-    - chr4
-    - chr5
-    - chr6
-    - chr7
-    - chr8
-    - chr9
     - chrX
     - chrY
+
+CONTAMINATION_BED:
+    "contamination.bed"

@@ -9,11 +9,18 @@ set -o nounset -o pipefail -o errexit -x
 
 args=' -q rna -o {log}.out -e {log}.err -J {params.job_name} -R "{params.memory}" -n {threads}'
 
+. /usr/share/Modules/init/bash
+module load modules modules-init modules-python
+module load anaconda
+unset PYTHONPATH
+source activate py37
+
 snakemake \
     --drmaa "$args" \
     --snakefile Snakefile \
-    --jobs 36 \
-    --resources all_threads=36 \
+    --jobs 160 \
+    --resources all_threads=160 \
     --latency-wait 300 \
     --rerun-incomplete \
-    --configfile config.yaml 
+    --configfile config.yaml
+    #--until deeptools_norm_factors 
