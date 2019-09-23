@@ -8,6 +8,7 @@ output: html_document
 
 ```{r libs}
 source("../../R/constants.R")
+source("../../R/viz.R")
 
 folding_dir <- "evofold_coverage/slop_10/"
 
@@ -343,3 +344,4 @@ plt_dat <- group_by(plt_dat,
 plot_sen_ppv(plt_dat, "s_ppv_filtering_cut_size.pdf", outdir, facet_by = "level")
 
 ```
+

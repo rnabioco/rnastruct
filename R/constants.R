@@ -21,3 +21,6 @@ docs_dir <- file.path(project_dir, "docs")
 db_dir <- file.path(project_dir, "dbases")
 
 theme_set(theme_cowplot())
+
+source(file.path(project_dir, "R", "io.R"))
+source(file.path(project_dir, "R", "viz.R"))

@@ -4,3 +4,10 @@
 .Ruserdata
 filterBam
 mpileupToReadCounts
+.pdf
+.db
+.map
+.fasta
+.rds
+.constraints
+
