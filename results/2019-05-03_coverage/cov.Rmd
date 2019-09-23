@@ -1,0 +1,86 @@
+---
+title: "depth"
+author: "Kent Riemondy RBI"
+date: "5/3/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(message = FALSE)
+knitr::opts_chunk$set(cache = TRUE)
+```
+
+```{r libs}
+source("../../R/constants.R")
+```
+
+```{r}
+files <- dir(file.path(data_dir, "coverage"),
+             pattern = ".bed",
+             full.names = T)
+
+names(files) <- basename(files)
+
+cols <- c(
+  "chrom",
+  "start",
+  "end",
+  "id",
+  "none_1",
+  "strand",
+  "n_features",
+  "n_nt",
+  "len",
+  "prop")
+
+dat <- map_dfr(files, read_tsv, col_names = cols, .id = "file") %>% 
+  separate(file, c("x", "feature", "depth"), sep = "_") %>% 
+  dplyr::select(-x) %>% 
+  mutate(depth = str_remove(depth, ".bed"))
+
+gene_dat <- dat %>% 
+  filter(feature == "genes") %>%
+  group_by(depth) %>% 
+  arrange(prop, .by_group = TRUE) %>% 
+  mutate(rank = row_number()) 
+
+
+ggplot(gene_dat, 
+       aes(rank, prop)) + 
+    geom_point(aes(color = depth)) 
+
+
+gene_dat %>% 
+  filter(prop > 0.80) %>% 
+  group_by(depth) %>% 
+  summarize(n = n()) %>% 
+  arrange(depth)
+```
+
+
+```{r}
+tx_dat <- dat %>% 
+  filter(feature == "exons") %>%
+  group_by(id, depth) %>% 
+  summarize(n_nt = sum(n_nt),
+            len = sum(len)) %>% 
+  group_by(depth) %>% 
+  mutate(prop = n_nt / len) %>% 
+  arrange(prop, .by_group = TRUE) %>% 
+  mutate(rank = row_number()) 
+
+ggplot(tx_dat, aes(rank, prop)) + 
+    geom_point(aes(color = depth)) 
+
+tx_dat %>% 
+  filter(prop > 0.80) %>% 
+  group_by(depth) %>% 
+  summarize(n = n()) %>% 
+  arrange(depth)
+```

@@ -1,0 +1,60 @@
+---
+title: "dms reactivites"
+author: "Kent Riemondy RBI"
+date: "3/27/2018"
+output: html_document
+---
+
+```{r libs}
+source("../../R/constants.R")
+```
+
+```{r}
+dms_data <- file.path(data_dir, 
+                      "mismatches", 
+                      "june2019")
+  
+files <- dir(dms_data, 
+             recursive = FALSE, 
+             full.names = TRUE,
+             pattern = ".bgz$")
+```
+
+
+```{r}
+calc_react_per_nucleotide <- function(df) {
+  df %>% 
+    group_by(ref_base) %>% 
+    summarize(n_mismatch_reads = sum(mmcount), 
+              n_ref_reads = sum(refcount)) %>% 
+    mutate(mutation_proportion = n_mismatch_reads /
+             n_ref_reads)
+}
+
+
+df <- read_tsv(gzfile(files[3]))
+
+calc_react_per_nucleotide(df)
+
+
+
+df %>% group_by(ref_base, strand) %>% 
+  summarize(n_mismatch_reads = sum(mmcount), 
+              n_ref_reads = sum(refcount)) %>% 
+    mutate(mutation_proportion = n_mismatch_reads /
+             n_ref_reads)
+
+f <- function(x, pos) {
+  dplyr::select(x, 
+                ref_base, strand, mmcount, refcount) %>% 
+    group_by(ref_base, strand) %>% 
+  summarize(n_mismatch_reads = sum(mmcount), 
+              n_ref_reads = sum(refcount))
+}
+  
+df <- read_tsv_chunked(gzfile(files[2]),
+                       ListCallback$new(f), 
+                       progress = TRUE, 
+                       chunk_size = 1e6) %>% 
+  bind_rows()
+```

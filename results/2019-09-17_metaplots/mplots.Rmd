@@ -1,0 +1,519 @@
+---
+title: "metaplots"
+author: "Kent Riemondy RBI"
+date: "9/17/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(tidyverse)
+library(txcompare)
+library(valr)
+source(here::here("R/constants.R"))
+```
+
+
+## Compare mismatch frequencies introduced by DMS
+
+Use full tables not background correct (minimum depth of 10)
+
+```{r, eval = FALSE}
+samples <- c("UT", "WT", paste0("C4_rep_",  1:5))
+
+full_table_files <- c(
+  file.path("~/Projects/rnastruct/data/mismatches/aug2019/full_tables",
+            paste0(samples[1:2], 
+                   "_pileup_table.tsv.bgz")),
+  file.path("~/Projects/rnastruct/data/mismatches/sept2019/full_tables",
+            samples[3:length(samples)],
+            paste0(samples[3:length(samples)], 
+                   "pileup_table.tsv.bgz")))
+  
+all(map_lgl(full_table_files, file.exists))  
+
+names(full_table_files) <- samples
+```
+
+Nope, instead us background corrected as mutation rate is too high likely to to mismapping and SNPs in Hela cells. 
+
+```{r}
+wt_dms_file <- "../../data/mismatches/aug2019/filtered_tables_no_cutoff/15/WT/pileup_table.sorted.tsv.bgz"
+
+
+slow_dms_files <- file.path("../../data/mismatches/sept2019/filtered_tables_no_cutoff/15/",
+                            paste0("C4_rep_",  1:5),
+                            "pileup_table.sorted.tsv.bgz")
+
+pileup_files <- c(wt_dms_file, slow_dms_files)
+
+names(pileup_files) <- c("WT", paste0("C4_rep_",  1:5))
+```
+
+Break up chromosomes into chunks to prevent loading oodles of data into R.
+
+```{r}
+genome <- suppressWarnings(read_genome("/Users/kriemo/Projects/shared_dbases/genomes/human/chr_appended_grch37/Homo_sapiens.GRCh37.dna.primary_assembly_chrappended.fa.fai"))
+
+chroms_to_check <- c(
+  paste0("chr", rep(1:22)),
+"chrX",
+"chrY"
+)
+
+genome <- filter(genome, chrom %in% chroms_to_check)
+
+# break into 1e8 basepair chunks
+bin_genome <- mutate(genome, 
+                     start = 0, 
+                     end = size) %>% 
+  bed_makewindows(win_size = 1e8) %>% 
+  select(chrom, start, end) %>% 
+  mutate(id = str_c(chrom, ":", start, "-", end)) %>% 
+  pull(id)
+
+```
+
+```{r}
+compute_summary <- function(fn, chroms){
+  
+  all_res <- map_dfr(chroms, 
+                     function(chrom){
+                       message(chrom)
+                       tmp <- read_tabix(fn, region = chrom) %>% 
+                         select(chrom = X1,
+                                pos = X2,
+                                strand = X3,
+                                ref_base = X4,
+                                total_reads = X5,
+                                mismatch_count = X12)
+                       
+                       res <- select(tmp, ref_base, strand, total_reads, mismatch_count)
+                       res <- group_by(res, ref_base, strand) %>% 
+                         summarize(total_reads = sum(total_reads),
+                                   mismatch_count = sum(mismatch_count)) %>% 
+                         ungroup()
+                       
+                       res <- mutate(res, 
+                                     percent_mismatch = 100 * mismatch_count / total_reads)
+                       res
+                     })
+  
+  all_res
+}
+
+mismatch_summary <- imap_dfr(pileup_files,
+    function(fn, id){
+      message(id)
+      compute_summary(fn, chroms = bin_genome)
+      },
+    .id = "library")
+
+
+#saveRDS(mismatch_summary, "mismatches_bgsub.rds")
+```
+
+```{r}
+#mismatch_summary  <- readRDS("mismatches.rds")
+
+plt_mismatch_summary <- mismatch_summary %>% 
+  group_by(library, ref_base) %>%
+  summarize(total_reads = sum(total_reads), 
+            mismatch_count = sum(mismatch_count)) %>%
+  mutate(percent_mismatch = 100 * mismatch_count/ total_reads) 
+
+plt <- ggplot(plt_mismatch_summary, aes(library, percent_mismatch)) +
+  geom_col(aes(fill = ref_base), position = "dodge") +
+  scale_fill_brewer(name = "",
+                    palette = "Set1") +
+  theme(axis.text.x = element_text(angle = 90,
+                                   hjust = 1, 
+                                   vjust = 0.5))
+outdir <- "plots"
+dir.create(outdir)
+
+save_plot(file.path(outdir, "mismatch_proportion.pdf"),
+          plt,
+          base_asp = 1.75)
+```
+
+
+Next examine distribution of background corrected normalized values. 
+
+```{r}
+
+wt_dms_file <- "../../data/mismatches/aug2019/filtered_tables_no_cutoff/15/WT/pileup_table.sorted.tsv.bgz"
+
+
+slow_dms_files <- file.path("../../data/mismatches/sept2019/filtered_tables_no_cutoff/15/",
+                            paste0("C4_rep_",  1:5),
+                            "pileup_table.sorted.tsv.bgz")
+
+pileup_files <- c(wt_dms_file, slow_dms_files)
+
+names(pileup_files) <- c("WT", paste0("C4_rep_",  1:5))
+
+res <- imap_dfr(pileup_files,
+    function(fn, id){
+      message(id)
+      tmp <- map(bin_genome,
+          function(x){
+            message(x)
+            read_tabix(fn, region = x) %>% 
+              pull(X22)
+          }) %>% 
+        unlist()
+    
+      tmp <- tibble(reactivities = tmp)
+      tmp <- tmp %>% 
+        summarize(q95 = quantile(reactivities, 0.95),
+                  list(broom::tidy(summary(reactivities)))) %>% 
+        unnest()
+      tmp
+    }, 
+    .id = "library")
+
+saveRDS(res, "means.rds")
+```
+
+```{r}
+res <- readRDS("means.rds")
+
+rename_stat <- c(
+  "mean"  = "Mean reactivity",
+  "q95" = "95%-tile reactivity"
+)
+
+res_plt <- gather(res, stat, value, -library) %>% 
+  filter(stat %in% c("q95", "mean")) %>% 
+  mutate(stat_name = rename_stat[stat])
+  
+
+plts <- ggplot(res_plt, aes(library, value)) +
+  geom_col(aes(fill = stat_name)) +
+  facet_wrap(~stat_name, scales = "free_y") +
+  scale_fill_brewer(name = "",
+                    palette = "Set1") +
+  theme(axis.text.x = element_text(angle = 90,
+                                   hjust = 1, 
+                                   vjust = 0.5),
+        legend.position = "none")
+outdir <- "plots"
+dir.create(outdir)
+
+save_plot(file.path(outdir, "reactivites_per_library.pdf"),
+          plts,
+          base_asp = 2.5)
+
+```
+
+
+## Examine 18s rRNA folding
+
+```{r}
+
+samples <- c(
+  "WT",
+  "C4_rep_1",
+  "C4_rep_2",
+  "C4_rep_3",
+  "C4_rep_4"
+)
+
+renamed_samples <- c(
+  "WT",
+  "C4_rep_1",
+  "C4_rep_3",
+  "C4_rep_4",
+  "C4_rep_5"
+)
+
+m_files <- file.path("rRNA_folding",
+                     "rRNA_maps_all",
+                     samples,
+                     "18s_start_coverage.map")
+
+m_dat <- purrr::map(m_files, read_map)
+
+names(m_dat) <- renamed_samples
+
+m_dat <- m_dat %>% 
+  imap(., ~select(.x, react, nuc) %>%
+         mutate(id = .y)) %>% 
+  bind_rows() 
+
+ss <- kentr::read_fasta("rRNA_folding/18sRNA_ss.fasta")
+# use first 601 nt 
+ss$seq <- str_split(ss$seq, "")[[1]][1:601] %>% paste0(. , collapse="")
+
+a <- split(m_dat, factor(m_dat$id, levels = renamed_samples)) %>% 
+  map(~list(paste0(.x$nuc[1:601], collapse = ""),
+           .x$react[1:601]))
+                               
+dat <- map(a, ~c(.x, ss$seq))
+
+outdir <- "rRNA_structures/all_nucleotides"
+dir.create(outdir, showWarnings = FALSE)
+
+for(i in seq_along(dat)){
+  plot_secondary_structure(seq = dat[[i]][[1]], 
+                           ss = dat[[i]][[3]], 
+                           color_by = dat[[i]][[2]],
+                           outpath = file.path(
+                             outdir,
+                             paste0(names(dat[i]), ".png")),
+                           max_quantile = 0.99,
+                           windsorize = FALSE)
+}
+
+outfiles <-  file.path(
+  outdir,
+  paste0(names(dat), ".png"))
+
+montage_args <- c(
+  "-label",
+  "%t",
+  outfiles,
+  "-pointsize", 128,
+  "-tile", "x1",
+  "-geometry", "+2+2",
+  "rRNA_structures/all_nucleotides/all_samples.png") 
+
+system2("montage",
+        montage_args)
+
+for(i in seq_along(dat)){
+  plot_secondary_structure(seq = dat[[i]][[1]], 
+                           ss = dat[[i]][[3]], 
+                           color_by = dat[[i]][[2]],
+                           outpath = file.path(
+                             outdir,
+                             paste0(names(dat[i]), "_windsorize.png")),
+                           max_quantile = 0.99,
+                           windsorize = TRUE)
+}
+
+outfiles <-  file.path(
+  outdir,
+  paste0(names(dat), "_windsorize.png"))
+
+montage_args <- c(
+  "-label",
+  "%t",
+  outfiles,
+  "-pointsize", 128,
+  "-tile", "x1",
+  "-geometry", "+2+2",
+  "rRNA_structures/all_nucleotides/all_samples_windsorize.png") 
+
+system2("montage",
+        montage_args)
+```
+
+
+
+```{r}
+m_files <- file.path("rRNA_folding",
+                     "rRNA_maps_ac",
+                     samples,
+                     "18s_start_coverage.map")
+
+m_dat <- purrr::map(m_files, read_map)
+
+names(m_dat) <- renamed_samples
+
+m_dat <- m_dat %>% 
+  imap(., ~select(.x, react, nuc) %>%
+         mutate(id = .y)) %>% 
+  bind_rows() 
+
+ss <- kentr::read_fasta("rRNA_folding/18sRNA_ss.fasta")
+# use first 601 nt 
+ss$seq <- str_split(ss$seq, "")[[1]][1:601] %>% paste0(. , collapse="")
+
+a <- split(m_dat, factor(m_dat$id, levels = renamed_samples)) %>% 
+  map(~list(paste0(.x$nuc[1:601], collapse = ""),
+           .x$react[1:601]))
+                               
+dat <- map(a, ~c(.x, ss$seq))
+
+outdir <- "rRNA_structures/ac_nucleotides"
+dir.create(outdir, showWarnings = FALSE)
+
+for(i in seq_along(dat)){
+  plot_secondary_structure(seq = dat[[i]][[1]], 
+                           ss = dat[[i]][[3]], 
+                           color_by = dat[[i]][[2]],
+                           outpath = file.path(
+                             outdir,
+                             paste0(names(dat[i]), ".png")),
+                           max_quantile = 0.99,
+                           windsorize = FALSE)
+}
+
+outfiles <-  file.path(
+  outdir,
+  paste0(names(dat), ".png"))
+
+montage_args <- c(
+  "-label",
+  "%t",
+  outfiles,
+  "-pointsize", 128,
+  "-tile", "x1",
+  "-geometry", "+2+2",
+  "rRNA_structures/ac_nucleotides/all_samples.png") 
+
+system2("montage",
+        montage_args)
+
+for(i in seq_along(dat)){
+  plot_secondary_structure(seq = dat[[i]][[1]], 
+                           ss = dat[[i]][[3]], 
+                           color_by = dat[[i]][[2]],
+                           outpath = file.path(
+                             outdir,
+                             paste0(names(dat[i]), "_windsorize.png")),
+                           max_quantile = 0.99,
+                           windsorize = TRUE)
+}
+
+outfiles <-  file.path(
+  outdir,
+  paste0(names(dat), "_windsorize.png"))
+
+montage_args <- c(
+  "-label",
+  "%t",
+  outfiles,
+  "-pointsize", 128,
+  "-tile", "x1",
+  "-geometry", "+2+2",
+  "rRNA_structures/ac_nucleotides/all_samples_windsorize.png") 
+
+system2("montage",
+        montage_args)
+```
+
+
+
+```{r}
+
+ref <- kentr::read_fasta("rRNA_folding/18sRNA_ss.fasta")
+wt_with_dms <- read_db("rRNA_folding/RNAstructure/18s_coverage.rnastructure")
+
+wt_no_dms <- read_db("rRNA_folding/RNAstructure/18s_coverage.nodms.rnastructure")
+
+calc_ss_similarity(wt_no_dms$ss, ref$seq, wt_no_dms$seq)
+calc_ss_similarity(wt_with_dms$ss, ref$seq, wt_with_dms$seq)
+```
+
+
+## Examine metaprofiles
+
+
+### stop codons
+
+```{r}
+gtf_fn <- "~/Projects/shared_dbases/annotation/gencode.v26.primary_assembly.annotation.gtf"
+
+gtf <- tidy_gtf(gtf_fn)
+
+# pull out genomic sequence surrounding stop
+# using just genomic b/c it's nascent RNA dms-seq
+stop_bed <- filter(gtf, type == "stop_codon") %>% 
+  bed_slop(genome = genome, both = 50, strand = TRUE) %>% 
+  select(chrom:end, gene_name, strand) %>%
+  unique() %>% 
+  group_by(chrom, start, end, strand) %>% 
+  arrange(gene_name, .by_group = TRUE) %>% # take first gene name if duplicated CDS stop
+  summarize(gene_name = dplyr::first(gene_name)) %>% 
+  ungroup() %>% 
+  bed_sort()
+
+stop_bed_windows <- filter(stop_bed, 
+                           strand == "+") %>%
+  ungroup() %>% 
+  mutate(feature_id = row_number()) %>% 
+  bed_makewindows(win_size = 1) 
+
+get_coverage <- function(fn, 
+                         full_region_ivls = stop_bed,
+                         window_ivls = stop_bed_windows,
+                         tbx_colname_to_plot = "X22",
+                         min_coverage = 0.9){
+  
+  message("getting coverage data from tabix file")
+  tbx_ivls <- read_tabix(fn, region_df = full_region_ivls) %>% 
+    select(chrom = X1,
+           end = X2,
+           strand = X3, 
+           value = !!sym(tbx_colname_to_plot)) %>% 
+    mutate(start = end - 1) %>% 
+    unique()
+  
+  message("computing coverage")
+  window_ivls <- group_by(window_ivls, strand)
+  tbx_ivls <- group_by(tbx_ivls, strand)  
+  
+  cov_ivls <- bed_map(window_ivls, tbx_ivls, values = value)
+  
+  message("removing regions with < ", min_coverage, " coverage")
+  
+  cov_ivls <- group_by(cov_ivls, feature_id) %>% 
+    mutate(n_prop_missing = sum(is.na(values)),
+           n_prop_missing = n_prop_missing / n()) %>% 
+    ungroup() %>% 
+    filter(n_prop_missing <= (1 - min_coverage))
+  
+  avg_ivls <- group_by(cov_ivls, .win_id) %>% 
+    summarize(mean_vals = sum(values, na.rm = TRUE))
+  
+  ggplot(avg_ivls, aes(.win_id, mean_vals)) +
+    geom_point()
+  
+  list(cov_ivls, 
+       avg_ivls)
+}
+
+get_coverage(fn = pileup_files[1])
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
