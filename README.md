@@ -7,15 +7,17 @@ This pipeline requires the following programs and has been tested on
 MacOS:
 
 [`samtools`](http://www.htslib.org/download/)  
+[`bcftools`](http://www.htslib.org/download/)  
 [`python3`](https://www.python.org/downloads/)   
-[`pandas`](https://pandas.pydata.org/) python package  
+
+Also python packages `pandas`, `cyvcf2`, `pysam`, and `dask`
 A C/C++ compiler with C++11 support (i.e. gcc or clang, available for
 macOS by installing the `Xcode` command line tools)
 
 ## Install 
 
 ```bash
-git clone --recursive git@github.com:rnabioco/rnastruct
+git clone git@github.com:rnabioco/rnastruct
 cd rnastruct/src
 make
 ```
@@ -31,14 +33,17 @@ Source your `.bash_profile`
 source ~/.bash_profile
 ```
 
-Also `samtools` needs to be installed and in your path
 
 Test your install
-```
-$ count_mutations.py -h
-usage: count_mutations.py [-h] -b BAM -f FASTA [-L LIBRARY] [-s STRANDEDNESS]
-                          [-p PILEUP] [-d DEPTH] [-l DELETION_LENGTH]
-                          [-o OUTPRE] [-t THREADS] [-v VERBOSE]
+
+```bash
+$ base_counter.py -h
+usage: base_counter.py [-h] -b BAM -f FASTA [-L LIBRARY] [-s STRANDEDNESS]
+                       [-p PILEUP] [-d DEPTH] [-l DELETION_LENGTH] [-o OUTPRE]
+                       [-t THREADS] [-n NUCLEOTIDES] [-ss] [-i]
+                       [-c CHROMS_TO_SKIP [CHROMS_TO_SKIP ...]] [-v] [-k]
+                       [--write-bgs]
+                       [--default-pileup-args DEFAULT_PILEUP_ARGS]
 
     Parse bam file and enumerate mismatches, insertions, and deletions per
     nucleotide. Generates bedgraphs for mismatches, insertions and
@@ -53,7 +58,7 @@ optional arguments:
                         passed to samtools mpileup
 
   -L LIBRARY, --library LIBRARY
-                        library type: either 'paired' or 'single' (default: single)
+                        library type: either 'paired' or 'single' (default: paired)
 
   -s STRANDEDNESS, --strandedness STRANDEDNESS
                         strandedness of library:
@@ -63,7 +68,7 @@ optional arguments:
                              for paired-end R2 alignments are the same sequence as the RNA
 
                           'fr-secondstrand' = second strand sequenced as R1
-                             i.e. R1 alignmnets are the same sequence as the RNA
+                             i.e. R1 alignments are the same sequence as the RNA
                              for paired-end R2 alignments are the reverse complement of the RNA
 
                           'unstranded' = report strandedness without respect to R1 or R2
@@ -78,8 +83,8 @@ optional arguments:
                         -B (disable BAQ calculation)
                         -d 1000000 (use up to 1e6 reads per base)
                         -L 1000000 (use up to 1e6 reads per base for indel calling)
-                        do not count orphan reads (paired end)
-                        do not double count if paired end reads overlap
+                        -A count orphan reads (paired end)
+                        -x disable read-pair overlap detection
 
   -d DEPTH, --depth DEPTH
                         minimum read coverage required for
@@ -98,21 +103,54 @@ optional arguments:
                         split up by chromosome to run using multiple
                         threads (default: 1)
 
-  -v VERBOSE, --verbose VERBOSE
-                        print run information (default: False)
+  -n NUCLEOTIDES, --nucleotides NUCLEOTIDES
+                        Nucleotides to use for computing
+                        mismatch and indel ratios. Provide
+                        as a string. i.e. to report
+                        for all nucleotides. "ATCG"
+                        (default: AC)
+
+  -ss, --skip-single-reads
+                        If set, skip single end reads when encountered
+                        in a paired-end library.
+                        (default: False , single end reads are
+                        counted by default)
+
+  -i, --tabix-index     If set, report pileup table
+                        as bgzip'd and tabix indexed
+                        (default: False)
+
+  -c CHROMS_TO_SKIP [CHROMS_TO_SKIP ...], --chroms-to-skip CHROMS_TO_SKIP [CHROMS_TO_SKIP ...]
+                        space separated list of chroms to ignore
+                        (default: None)
+
+  -v, --verbose         print run information (default: False)
+  -k, --keep-temp-files
+                        don't delete temp files (default: True)
+  --default-pileup-args DEFAULT_PILEUP_ARGS
+                        The following arguments are set by default
+                        --ff UNMAP,SECONDARY,QCFAIL,DUP (filter alignments)
+                        -B (disable BAQ calculation)
+                        -d 1000000 (use up to 1e6 reads per base)
+                        -I dont call indels
+                        -A count orphan reads (paired end)
+                        -x disable read-pair overlap detection
+                        -a AD
+                        pass a string to replace these args
+                        (default:  --ff UNMAP,SECONDARY,QCFAIL,DUP -a AD -A -x -d 100000 -L 100000 -B -O v )
 ```
 
 ## Generate mismatch and indel bedgraphs
 
-`count_mutations.py` is a python script that generates per nucleotide counts of indels and mismatches in bedgraph
-format. 
+`base_counter.py` is a python script that generates per nucleotide counts of indels and mismatches in 
+a tabix indexed flat tsv file. 
 
-The script generates and parses the output from running samtools
-[`mpileup`](http://www.htslib.org/doc/samtools.html) and 
-[`mpileup2ReadCounts`](https://github.com/kriemo/mpileup2readcounts).
+The script generates and parses the output from running bcftools
+[`mpileup`](http://www.htslib.org/doc/bcftools.html) and 
+`pileup_to_counts.py`
 
 ```bash
-count_mutations.py \
+base_counter.py \
   -b alignments.bam \
   -f genome.fasta 
 ```
@@ -120,19 +158,21 @@ count_mutations.py \
 The following files will be generated:
 
 ```
-pileup_table.tsv.gz
+pileup_table.tsv.bgz
+pileup_table.tsv.bgz.tbi
+
 neg_depth.bedgraph.gz
-neg_deletions.bedgraph.gz
-neg_insertions.bedgraph.gz
+neg_indels.bedgraph.gz
 neg_mismatches.bedgraph.gz
+neg_mutations.bedgraph.gz
 pos_depth.bedgraph.gz
-pos_deletions.bedgraph.gz
-pos_insertions.bedgraph.gz
+pos_indels.bedgraph.gz
 pos_mismatches.bedgraph.gz
+pos_mutations.bedgraph.gz
 ```
 
-`pileup_table.tsv.gz` contains per nucleotide counts of read depth, counts
-of each nucleotide, insertion, and deletion per strand.
+`pileup_table.tsv.bgz` contains per nucleotide counts of read depth, counts
+of each nucleotide, indels, and deletions.
 
 The `.bedgraph.gz` files are strand specific bedgraphs for mismatches and
 indels. 

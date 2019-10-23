@@ -742,15 +742,6 @@ def main():
                         \n"""),
                         action = 'store_true')
                         
-    parser.add_argument('-i',
-                        '--tabix-index',
-                        help=textwrap.dedent("""\
-                        If set, report pileup table 
-                        as bgzip'd and tabix indexed
-                        (default: %(default)s)
-                        \n"""),
-                        action = 'store_true')
-
     parser.add_argument('-c',
                         '--chroms-to-skip',
                         help=textwrap.dedent("""\
@@ -770,10 +761,6 @@ def main():
                         '--keep-temp-files',
                         help="""don't delete temp files (default: %(default)s)\n""",
                         action = 'store_false')
-    
-    parser.add_argument('--write-bgs',
-                        help="""pass flag to write bedgraphs""",
-                        action = 'store_true')
     
     parser.add_argument('--default-pileup-args',
                         help = textwrap.dedent("""\
@@ -817,7 +804,6 @@ def main():
     strandedness = args.strandedness
     skip_singles = args.skip_single_reads
     chroms_to_skip = args.chroms_to_skip
-    write_bgs = args.write_bgs
 
     #### check options
     if not os.path.isfile(bam_name) or not os.path.isfile(fasta_name):
@@ -907,18 +893,18 @@ def main():
     ## merge redundant intervals
     merge_bedgraphs(tmp_dir, ["pos_", "neg_"], outpre, threads)
     
-    ## bgzip and index if requested
-    if args.tabix_index:
-        out_tbl = outpre + "pileup_table.tsv.gz" 
-        out_bgzip = bgzip(out_tbl)        
-        pysam.tabix_index(out_bgzip, 
-                          seq_col = 0, 
-                          start_col = 1,
-                          end_col = 1, 
-                          zerobased = False,
-                          force = True, 
-                          line_skip = 1)
+    ## bgzip and index
+    out_tbl = outpre + "pileup_table.tsv.gz" 
+    out_bgzip = bgzip(out_tbl)        
+    pysam.tabix_index(out_bgzip, 
+                      seq_col = 0, 
+                      start_col = 1,
+                      end_col = 1, 
+                      zerobased = False,
+                      force = True, 
+                      line_skip = 1)
 
+    print("Done", file = sys.stderr)
                 
 if __name__ == '__main__': main()
 
