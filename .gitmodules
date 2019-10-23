@@ -1,3 +1,0 @@
-[submodule "src/mpileup2readcounts"]
-	path = src/mpileup2readcounts
-	url = git://github.com/kriemo/mpileup2readcounts.git

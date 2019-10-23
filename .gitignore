@@ -10,4 +10,4 @@ mpileupToReadCounts
 .fasta
 .rds
 .constraints
-
+__pycache__
