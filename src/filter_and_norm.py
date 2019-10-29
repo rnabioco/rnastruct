@@ -14,7 +14,8 @@ import subprocess
 import functools
 
 from extract_transcript import Structpileup
-from count_mutations import bgzip
+from utils import bgzip
+import norm_methods
 
 def unix_sort2(infile, outfile, threads, memory = "8G", header = True, compress = True,
         uncompress = True, verbose = True):
@@ -105,7 +106,8 @@ def calc_global_norm(x):
             file = sys.stderr)
     return norm_factor
 
-def remove_untreated(t_path, ut_path, contig, depth, outfile):
+def remove_untreated(t_path, ut_path, contig, depth, nucs_to_keep,
+        outfile, max_untreated_ratio, max_treated_ratio):
 
     print("processing ", contig)  
     t_df = pd.read_csv(t_path,
@@ -121,12 +123,14 @@ def remove_untreated(t_path, ut_path, contig, depth, outfile):
             suffixes = ("", "_ut"))
     
     out = out.fillna(0.0)
+    
+    out = out[out.ref_base.isin(nucs_to_keep)]
 
     # drop ivls with high mutation rate in untreated 
-    out = out[out['mutation_ratio_ut'] < 0.02]
+    out = out[out['mutation_ratio_ut'] < max_untreated_ratio]
     
     # drop ivls with high modification rate in treated 
-    out = out[out['mutation_ratio'] < 0.10]
+    out = out[out['mutation_ratio'] < max_treated_ratio]
     out = out.reset_index(drop=True)
     
     out["mutation_ratio_bg_sub"] = out["mutation_ratio"] - out["mutation_ratio_ut"]
@@ -187,14 +191,24 @@ def main():
                         \n""",
                         required = True)
 
-    parser.add_argument('-r',
-                        '--reactivity_cutoff',
+    parser.add_argument('-ur',
+                        '--untreated_reactivity_cutoff',
                         help = textwrap.dedent("""\
                         reactivities cutoffs to exclude.
                         (default: %(default)s)
                         \n"""),
                         required = False,
                         default = 0.02,
+                        type = float)
+    
+    parser.add_argument('-tr',
+                        '--treated_reactivity_cutoff',
+                        help = textwrap.dedent("""\
+                        reactivities cutoffs to exclude.
+                        (default: %(default)s)
+                        \n"""),
+                        required = False,
+                        default = 0.10,
                         type = float)
     
     parser.add_argument('-d',
@@ -206,6 +220,19 @@ def main():
                         required = False,
                         default = 10,
                         type = int)
+    
+    parser.add_argument('-n',
+                        '--nucleotides',
+                        help=textwrap.dedent("""\
+                        Nucleotides to use for computing
+                        mismatch and indel ratios. Provide
+                        as a string. i.e. to report 
+                        for all nucleotides. "ATCG"
+                        (default: %(default)s)
+                        \n"""),
+                        required = False,
+                        default = "ATCG",
+                        type = str)
     
     parser.add_argument('-p',
                         '--proc',
@@ -265,8 +292,18 @@ def main():
             for contig in contigs]
     out_contig_files = [os.path.join(tmp_dir, "merge_" + contig +
             ".tsv.gz") for contig in contigs]
+    
+    nucs_to_keep = args.nucleotides
+    nucs_to_keep = [x.upper() for x in nucs_to_keep]
 
-    mp_args = zip(t_contig_files, ut_contig_files, contigs, [depth] * len(contigs), out_contig_files)
+    mp_args = zip(t_contig_files, 
+                  ut_contig_files, 
+                  contigs, 
+                  [depth] * len(contigs), 
+                  [nucs_to_keep] * len(contigs), 
+                  out_contig_files,
+                  [args.untreated_reactivity_cutoff] * len(contigs),
+                  [args.treated_reactivity_cutoff] * len(contigs))
 
     with mp.Pool(thread_count) as pool:
         contig_files = pool.starmap(remove_untreated, mp_args) 
@@ -289,8 +326,12 @@ def main():
     
     # calc norm factor.
     df = pd.read_csv(output, sep = "\t", compression = 'gzip')
-    normalization_factor = calc_global_norm(df["mutation_ratio_bg_sub"].values)
-    df["mutation_ratio_norm"] = df["mutation_ratio_bg_sub"] / normalization_factor 
+    #normalization_factor = calc_global_norm(df["mutation_ratio_bg_sub"].values)
+    
+    normalization_factor = np.quantile(df["mutation_ratio_bg_sub"].values, [0.95])
+    windsorized_vals = norm_methods.windsorize(df["mutation_ratio_bg_sub"].values)
+
+    df["mutation_ratio_norm"] = windsorized_vals / normalization_factor 
     df["stderr_norm"] = df["stderr_bg_sub"] / normalization_factor
     df.to_csv(output, index = False, sep = "\t", compression = "gzip")
     
@@ -318,4 +359,5 @@ def main():
             os.unlink(fn)
 
 if __name__ == '__main__': main()
+
 

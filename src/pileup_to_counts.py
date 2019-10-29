@@ -37,7 +37,43 @@ def is_snp(v):
         if not v.ALT[i] in ("A", "C", "G", "T", "<*>"):
             return False
         return (len(v.REF) + len(v.ALT)) > 1
+
+class IndelCache():
+    """cache to hold vcf records for indels. Used to ensure
+    that indel position reporting is right aligned if reverse stranded
+    alignments were used"""
+
+    def __init__(self, chrom = None):
+        self.d = Counter()
+        self.chrom = chrom
+        
+    def add(self, ac):
+        # affect nucleotide is first deleted or first insetion pos
+        if ac.strand == "+":
+            # report left aligned position
+            self.d[ac.v.POS + 1] += ac.allele_counts["indel"] 
+        else:
+            # report right aligned position
+            right_align_pos = ac.v.POS + max(len(ac.v.REF) - 1, 1)
+            self.d[right_align_pos] += ac.allele_counts["indel"] 
     
+    def n(self):
+        return len(self.d)
+
+    def get_indel_depth(self, ac):
+        return self.d.pop(ac.v.POS, 0)
+    
+    def clear(self):
+        self.d.clear()
+        self.chrom = None
+
+    def __str__(self):
+        res = []
+        for k,v in self.d.items():
+          out = "{}\t{}".format(str(k), str(v))
+          res.append(out)
+        return "\n".join(res)
+
 class AlleleCounter():
     "Single sample allele counter for bcftools mpileup VCF"
     
@@ -99,6 +135,11 @@ class AlleleCounter():
             # https://github.com/samtools/bcftools/issues/912
             self.allele_counts["indel"] += self.v.INFO.get("IDV")
             self.is_indel = True
+            # set indel position based on strandedness
+            # if + just set to next position 
+            # if - set to length of REF 
+            # need to look into if right alignment of the indel is
+            # going to mess this up
             self.indel_pos = self.v.POS + 1
             
         elif is_snp(self.v):
@@ -132,7 +173,8 @@ def write_header(fo):
   
   fo.write("\t".join(tbl_cols) + "\n")
 
-def vcf_to_counts(vcf_fn, out_fn, min_depth = 10, return_comp = False, n_records= -1): 
+def vcf_to_counts(vcf_fn, out_fn, min_depth = 10, return_comp = False,
+        n_records= -1, debug = True): 
       
   if return_comp:
       strand = "-"
@@ -144,6 +186,9 @@ def vcf_to_counts(vcf_fn, out_fn, min_depth = 10, return_comp = False, n_records
   write_header(fo)
   vcf = VCF(vcf_fn)
   n_good_variants = 0
+
+  ic = IndelCache()
+  previous_rec = None
   for i,v in enumerate(vcf):
 
       if i == n_records:
@@ -151,30 +196,62 @@ def vcf_to_counts(vcf_fn, out_fn, min_depth = 10, return_comp = False, n_records
       
       if n_good_variants == 0:
           n_good_variants += 1
-          ac = AlleleCounter(v, strand)
+          ic = IndelCache(v.CHROM)
+          previous_rec = AlleleCounter(v, strand)
           continue
       
-      if (v.CHROM, v.POS) == (ac.v.CHROM, ac.v.POS):
-          # check whether previous nt was a an indel
-          # if so, add indel counts 
-          tmp_ac = AlleleCounter(v, strand)
-          if tmp_ac.is_indel:
-              all_bases = ac
-              ac = tmp_ac
-          else:
-              sys.exit("not sure what to do")
+      if ic.chrom != v.CHROM:
+          if debug:
+            print("after processing {},  {} records remain".format(ic.chrom, 
+                        ic.n()))
+            print(ic)
+          ic.clear()
+          ic = IndelCache(v.CHROM)
+
+      current_rec = AlleleCounter(v, strand)
+      
+      if current_rec.is_indel:
+          
+          ic.add(current_rec)
+          all_bases = previous_rec
+          # dont report indel as single record
+          previous_rec = current_rec
       else:
-          if ac.is_indel and (v.CHROM == ac.v.CHROM and v.POS == ac.indel_pos):
-              ac = ac.add_indel_depth(v)
-              continue
+          if current_rec.v.POS in ic.d:
+              # add indel depths to current record
+              # pop POS from IndelCache()
+              icounts = ic.get_indel_depth(current_rec)
+              current_rec.allele_counts["indel"] += icounts
+              # need to consume reference depth due to right alignment of
+              # indel, unless next to indel
+              if not previous_rec.is_indel:
+                current_rec.allele_counts[current_rec.v.REF] -= icounts
+              all_bases = previous_rec
+              previous_rec = current_rec
+
           else:
-              all_bases = ac
-              ac = AlleleCounter(v, strand)  
-       
+              if previous_rec.is_indel:
+                  previous_rec = current_rec
+                  continue
+              all_bases = previous_rec
+              previous_rec = current_rec 
+      
+      if all_bases.is_indel:
+            continue
+      # need to check if indel cache is still present at end of contig
+      # debug with printing
+
       if sum(all_bases.allele_counts.values()) >= min_depth:
           fo.write(str(all_bases))
-      
-  fo.write(str(ac))
+  
+  if previous_rec is not None and not previous_rec.is_indel:
+    fo.write(str(previous_rec))
+  
+  if debug:
+    print("after processing {},  {} records remain".format(ic.chrom, 
+                ic.n()))
+    print(ic)
+  
   vcf.close()
   fo.close()
 
@@ -199,7 +276,7 @@ if __name__ == '__main__':
     
     parser.add_argument('-d',
                         '--depth',
-                        help="""minimum depth tp report
+                        help="""minimum depth to report
                         \n""",
                         required = False,
                         default = 1,
@@ -212,9 +289,15 @@ if __name__ == '__main__':
                         (default: %(default)s)
                         \n""",
                         action = 'store_true')
+    parser.add_argument('--verbose',
+                        help = """
+                        (default: %(default)s)
+                        \n""",
+                        action = 'store_true')
     
     args = parser.parse_args()
     
     
-    vcf_to_counts(args.vcf, args.output, int(args.depth), args.complement)
+    vcf_to_counts(args.vcf, args.output, int(args.depth), args.complement,
+            debug = args.verbose)
 
