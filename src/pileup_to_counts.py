@@ -245,7 +245,8 @@ def vcf_to_counts(vcf_fn, out_fn, min_depth = 10, return_comp = False,
           fo.write(str(all_bases))
   
   if previous_rec is not None and not previous_rec.is_indel:
-    fo.write(str(previous_rec))
+      if sum(all_bases.allele_counts.values()) >= min_depth:
+          fo.write(str(previous_rec))
   
   if debug:
     print("after processing {},  {} records remain".format(ic.chrom, 
