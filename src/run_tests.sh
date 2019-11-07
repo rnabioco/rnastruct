@@ -1,5 +1,7 @@
 #! /usr/bin/env bash 
 
+set -x
+
 fa=$HOME/Projects/shared_dbases/genomes/human/chr_appended_grch37/Homo_sapiens.GRCh37.dna.primary_assembly_chrappended.fa 
 
 base_counter.py \

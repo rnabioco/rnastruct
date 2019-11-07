@@ -111,7 +111,9 @@ class TestBaseCounter:
       cols = []
       chr_strands = set()
       uid_set = set()
-
+      
+      ivls_to_check = ["chr12", "6646357", "+", 100]
+      ivls_found = False
       with gzip.open(self.both_pre + "pileup_table.tsv.bgz", 'rt') as f:
         for idx,line in enumerate(f):
             fields = line.strip().split("\t")
@@ -126,7 +128,7 @@ class TestBaseCounter:
             chroms.add(chrom)
             strands.add(strand)
             chr_strands.add((chrom, strand))
-       
+         
             # see if any positions are duplicated
             if (chrom, pos, strand) in uid_set:
                 raise AssertionError("chrom, pos, and strand shouldn't be duplicated")
@@ -136,6 +138,10 @@ class TestBaseCounter:
             depth = int(fields[4])
             if depth < min_depth:
                 raise AttributeError("depth of {} detected".format(depth))
+            
+            if [chrom,pos,strand,depth] == ivls_to_check:
+                ivls_found = True
+            
 
       strands = list(strands)
       chroms = list(chroms)
@@ -145,6 +151,7 @@ class TestBaseCounter:
       
       assert ("chr12", "+") in chr_strands
       assert ("chr17", "-") in chr_strands
+      assert ivls_found
 
     def test_fwd(self):
         strands = set()

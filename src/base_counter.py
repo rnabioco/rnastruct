@@ -296,80 +296,98 @@ def parse_library_type(bam_path, strandedness, libtype, skip_single_ended
       if skip_single_ended, then will not count single-end alignments found
       mixed with paired-end alignments 
     """
-    
+    flags = {}
     if strandedness == "fr-firststrand":
       if libtype == "paired":
+        flags["sense"] = []
+        flags["antisense"] = []
+        
         ## parse out forward strand alignments (R2) (second in pair, forward mapped)
         sam_flag_1 = "-f 128 -F 16 "
-        lib_type_1 = "sense"
+        flags["sense"].append(sam_flag_1)
+
         ## parse out forward strand alignments (R1) (first in pair reverse mapped (16 + 64))
         sam_flag_2 = "-f 80 "
-        lib_type_2 = "sense"
+        flags["sense"].append(sam_flag_2)
         
         ## parse out reverse alignments (R2) (second in pair, reverse mapped (128 + 16))
         sam_flag_3 = "-f 144 "
-        lib_type_3 = "antisense"
+        flags["antisense"].append(sam_flag_3)
+
         ## parse out reverse alignments (R1) (first in pair, forward mapped)
         sam_flag_4 = "-f 64 -F 16"
-        lib_type_4 = "antisense"
+        flags["antisense"].append(sam_flag_4)
         
-        output = [[sam_flag_1, lib_type_1], 
-                  [sam_flag_2, lib_type_2],
-                  [sam_flag_3, lib_type_3],
-                  [sam_flag_4, lib_type_4]]
+        #output = [[sam_flag_1, lib_type_1], 
+        #          [sam_flag_2, lib_type_2],
+        #          [sam_flag_3, lib_type_3],
+        #          [sam_flag_4, lib_type_4]]
         
         if not skip_single_ended:
-            output.append([ "-f 16 -F 1 ", "sense"])
-            output.append(["-F17 ", "antisense"])
-        return output
+            #output.append([ "-f 16 -F 1 ", "sense"])
+            #output.append(["-F17 ", "antisense"])
+           
+            flags["sense"].append("-f 16 -F 1")
+            flags["antisense"].append("-F17 ")
 
       else:
         # single end
-        output = []
-        output.append([ "-f 16 -F 1 ", "sense"])
-        output.append(["-F17 ", "antisense"])
-        return output
+        #output = []
+        
+        flags["sense"].append("-f 16 -F 1")
+        flags["antisense"].append("-F17 ")
+        
+        #output.append([ "-f 16 -F 1 ", "sense"])
+        #output.append(["-F17 ", "antisense"])
         
         
     elif strandedness == "fr-secondstrand":
+      flags["sense"] = []
+      flags["antisense"] = []
+      
       if libtype == "paired":
         ## parse out forward strand alignments (R2) (second in pair, reverse mapped)
         sam_flag_1 = "-f 144 "
-        lib_type_1 = "sense"
+        flags["sense"].append(sam_flag_1)
+
         ## parse out forward strand alignments (R1) (first in pair not reverse mapped (16 + 64))
         sam_flag_2 = "-f 64 -F 16 "
-        lib_type_2 = "sense"
+        flags["sense"].append(sam_flag_2)
         
         ## parse out reverse alignments (R2) (second in pair, forward mapped)
         sam_flag_3 = "-f 128 -F 16 "
-        lib_type_3 = "antisense"
+        flags["antisense"].append(sam_flag_3)
+        
         ## parse out reverse alignments (R1) (first in pair, reverse mapped)
         sam_flag_4 = "-f 80"
-        lib_type_4 = "antisense"
+        flags["antisense"].append(sam_flag_4)
         
-        output = [[sam_flag_1, lib_type_1], 
-                  [sam_flag_2, lib_type_2],
-                  [sam_flag_3, lib_type_3],
-                  [sam_flag_4, lib_type_4]]
+        #output = [[sam_flag_1, lib_type_1], 
+        #          [sam_flag_2, lib_type_2],
+        #          [sam_flag_3, lib_type_3],
+        #          [sam_flag_4, lib_type_4]]
         
         if not skip_single_ended:
-            output.append([ "-f 16 -F 1 ", "antisense"])
-            output.append(["-F17 ", "sense"])
-        return output
+            flags["antisense"].append("-f 16 -F 1")
+            flags["sense"].append("-F17 ")
+            #output.append([ "-f 16 -F 1 ", "antisense"])
+            #output.append(["-F17 ", "sense"])
 
       else:
         # single end
-        output = []
-        output.append([ "-f 16 -F 1 ", "antisense"])
-        output.append(["-F17 ", "sense"])
-        return output
+        #output = []
+        #output.append([ "-f 16 -F 1 ", "antisense"])
+        #output.append(["-F17 ", "sense"])
+        flags["antisense"].append("-f 16 -F 1")
+        flags["sense"].append("-F17 ")
         
     elif strandedness == "unstranded":
-      
-      return [["", "sense"]]
+      flags["sense"] = [""]
       
     else:
       sys.exit("libtype specification failed")
+    
+    return flags
 
 def setdiff(lst_a, lst_b):
     sety = set(lst_b)
@@ -541,7 +559,7 @@ def compute_chunks(n_lines, n_default_lines = 100000):
 
 
 def merge_pileup_tables(pileup_fns, output_pileup_fn, tmp_dir, 
-        threads = 1, verbose = True):
+        min_depth = 1, outformat = "hdf", threads = 1, verbose = True):
     """ sort and merge the sense and antisense pileup tables
     samtools returns pileup format sorted by largest chromosome in 
     descending order
@@ -578,10 +596,19 @@ def merge_pileup_tables(pileup_fns, output_pileup_fn, tmp_dir,
               file = sys.stderr)
     
     cols = header.rstrip().split("\t")
-    df = dd.read_csv(out_tmp_sorted_ptable, names = cols, sep = "\t")
-    df = df.groupby(['chr', 'pos', 'strand', 'ref_base']).sum().compute(num_workers = threads)
-    df = df.reset_index()
-    df.to_hdf(output_pileup_fn, 'df', format = 'table')
+    df = pd.read_csv(out_tmp_sorted_ptable, names = cols, sep = "\t",
+            nrows = 10)
+
+    if df.shape[0] > 0:
+      df = dd.read_csv(out_tmp_sorted_ptable, names = cols, sep = "\t")
+      df = df.groupby(['chr', 'pos', 'strand', 'ref_base']).sum().compute(num_workers = threads)
+      df = df.reset_index()
+      df = df[df.depth >= min_depth]
+    
+    if outformat is "hdf":
+        df.to_hdf(output_pileup_fn, 'df', format = 'table')
+    else:
+        df.to_csv(output_pileup_fn, sep = "\t", index = False)
 
     os.unlink(out_tmp_sorted_ptable)
     for f in pileup_fns:
@@ -848,37 +875,47 @@ def main():
     bam_flags = parse_library_type(bam_name, strandedness, library,
             skip_singles)
     
-    ## parse bam into two new bams if paired end
-    ## one bam with all alignments that report the correct strand of the fragment
-    ## the other bam with all alignments that are rev-comp of the fragment
-    ## invert the second bam reported strands and merge
+    ## pass bams with proper flags to filter to pos and neg alignments
+    ## based on library type
+    ## merge tables and filter for depth for sense and antisense
+    ## independently
     pileup_tbls = []
-      
-    for idx, bam_flag in enumerate(bam_flags):
-      bam_flag_filter = bam_flag[0]
-      align_type = bam_flag[1]
-      pileup_fn = os.path.join(tmp_dir, bam_flag[1]+ "_" + str(idx))
-      if not os.path.exists(pileup_fn): 
-        os.makedirs(pileup_fn)
-        
-      pileup_tbl = generate_mismatch_profile(bam_name, 
-        fasta_name, 
-        pileup_args,
-        depth,
-        pileup_fn,
-        threads,
-        deletion_length,
-        bam_flag_filter,
-        align_type,
-        chroms_to_skip,
-        verbose) 
-      
-      pileup_tbls.append(pileup_tbl)
-        
-    output_pileup_fn = os.path.join(tmp_dir, "pileup_table.hd5")
-    merge_pileup_tables(pileup_tbls, output_pileup_fn, tmp_dir, threads, verbose)
-      
     
+    for align_type,flags in bam_flags.items():
+      tmp_pileup_tbls = []
+      for idx, bam_flag in enumerate(flags):
+        bam_flag_filter = bam_flag
+        pileup_fn = os.path.join(tmp_dir, align_type + "_" + str(idx))
+        if not os.path.exists(pileup_fn): 
+          os.makedirs(pileup_fn)
+          
+        pileup_tbl = generate_mismatch_profile(bam_name, 
+          fasta_name, 
+          pileup_args,
+          1,
+          pileup_fn,
+          threads,
+          deletion_length,
+          bam_flag_filter,
+          align_type,
+          chroms_to_skip,
+          verbose) 
+        
+        tmp_pileup_tbls.append(pileup_tbl)
+          
+      tmp_output_pileup_fn = os.path.join(tmp_dir, "pileup_table_" +
+              align_type + ".tsv.gz")
+      merge_pileup_tables(tmp_pileup_tbls, tmp_output_pileup_fn, tmp_dir,
+              depth, 
+              "gzip", 
+              threads, verbose)
+      pileup_tbls.append(tmp_output_pileup_fn)
+
+    output_pileup_fn = os.path.join(tmp_dir, "pileup_table.hd5")
+    merge_pileup_tables(pileup_tbls, output_pileup_fn, tmp_dir, depth,
+            "hdf",
+            threads, verbose)
+
     print("parsing pileup into bedgraph format", file = sys.stderr)
 
     ## parse output into bedgraphs
