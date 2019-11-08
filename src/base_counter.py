@@ -803,7 +803,7 @@ def main():
                         (default: %(default)s)\n"""
                         ),
                         required = False,
-                        default = " --ff UNMAP,SECONDARY,QCFAIL,DUP -a AD -A -x -d 100000 -L 100000 -B -O v ")
+                        default = " --ff UNMAP,SECONDARY,QCFAIL,DUP -a AD -A -x -d 10000 -L 10000 -B -O v ")
     
     args = parser.parse_args()
     
