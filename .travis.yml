@@ -11,7 +11,7 @@ addons:
       - gcc
 
 before_install:
-    - .travis/install_deps.sh
+    - ./.travis/install_deps.sh
          
 python:
   - "3.6"
