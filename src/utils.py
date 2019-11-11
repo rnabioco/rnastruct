@@ -215,6 +215,10 @@ def split_bam(bam, outbam, flags, threads = 1, memory = "1G", force = False):
     memory: memory arg for samtools sort
     force: if outbam exists overwrite
     """
+     
+    idx_threads = min(threads, 4)
+    view_threads = threads
+    merge_threads = threads
 
     if os.path.isfile(outbam):
         if not force:
@@ -230,7 +234,7 @@ def split_bam(bam, outbam, flags, threads = 1, memory = "1G", force = False):
               "view",
               "-b",
               "-@",
-              str(threads),
+              str(view_threads),
               *flag_cmd.split(),
               "-o",
               tmp_bam,
@@ -245,7 +249,7 @@ def split_bam(bam, outbam, flags, threads = 1, memory = "1G", force = False):
             "samtools",
             "merge",
             "-@",
-            str(threads), 
+            str(merge_threads), 
             "-f", 
             outbam, 
             *tmp_bams]
@@ -258,7 +262,7 @@ def split_bam(bam, outbam, flags, threads = 1, memory = "1G", force = False):
            "samtools",
            "index",
            "-@",
-           str(threads), 
+           str(idx_threads), 
            outbam
     ]
 
