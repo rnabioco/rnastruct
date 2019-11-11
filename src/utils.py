@@ -86,15 +86,15 @@ def setdiff(lst_a, lst_b):
     return [x for x in lst_a if x not in sety]
 
 
-def ungzip(in_fn, out_fn):
-
+def ungzip(in_fn, out_fn, remove = True):
+    
     with gzip.open(in_fn, 'rb') as f_in:
       with open(out_fn, 'wb') as f_out:
         shutil.copyfileobj(f_in, f_out)
-    
-    os.unlink(in_fn)
+    if remove:
+      os.unlink(in_fn)
 
-def bgzip(in_fn):
+def bgzip(in_fn, remove = True):
     """
     convert file to bgzipped format
     """
@@ -107,11 +107,12 @@ def bgzip(in_fn):
       out_fn = in_fn + ".bgz"
     
     pysam.tabix_compress(tmp_out_fn, out_fn, force = True)
-    os.unlink(tmp_out_fn)
+    if remove:
+      os.unlink(tmp_out_fn)
     
     return out_fn
 
-def unix_sort(out_tmp_ptable, tmp_dir, threads, memory = "8G", verbose = False):
+def unix_sort(in_fn, out_fn, threads, memory = "8G", verbose = False):
 
 
     sort_test = subprocess.run(["sort", "--parallel=2"],
@@ -124,26 +125,31 @@ def unix_sort(out_tmp_ptable, tmp_dir, threads, memory = "8G", verbose = False):
       if verbose:
         print("Parallel sort not available (man sort), using 1 thread",
                sys.stderr)
-
-    outfile = os.path.join(tmp_dir, "tmp_sorted_pileup_table.tsv")
-    outfn = open(outfile, 'w')
-    sort_cmd = "gunzip -c " + out_tmp_ptable + \
-               " | sort -S " + memory
+    
+    sort_cmd = ["sort", "-S", memory]
     if parallel_sort_available:
-        sort_cmd = sort_cmd + " --parallel=" + str(threads)
+        sort_cmd += ["--parallel=" + str(threads)]
 
-    sort_cmd = sort_cmd + " -k1,1 -k2,2n -k3,3 " + \
-               " - "
+    sort_cmd += ["-k1,1", "-k2,2n", "-k3,3"]
+
+    out_fh = gzip.open(out_fn, 'wt', compresslevel = 6)
+    
+    gunzip = subprocess.Popen(['gunzip', '-c', in_fn],
+            stdout=subprocess.PIPE)
+    sort_output = subprocess.Popen(sort_cmd,
+            stdin = gunzip.stdout,
+            stdout = subprocess.PIPE)
+    gzip_output = subprocess.Popen(["gzip"],
+            stdin = sort_output.stdout,
+            stdout = out_fh)
+    gunzip.stdout.close()
+    gzip_output.wait()
 
     if verbose:
-        print("sort command is:\n" + sort_cmd, file = sys.stderr)
+        print("sort command is:\n" + " ".join(output.args), file = sys.stderr)
 
-    sort_run = subprocess.run(sort_cmd, shell=True,
-            stderr = sys.stderr,
-            stdout = outfn)
-
-    outfn.close()
-    return outfile
+    out_fh.close()
+    return out_fn
            
 def external_sort(out_tmp_ptable, tmp_dir, nlines, verbose = False):
 
@@ -194,3 +200,75 @@ def external_sort(out_tmp_ptable, tmp_dir, nlines, verbose = False):
                                                                     x.split("\t")[2])))
     for i in chunk_names:
       os.unlink(i)
+      
+
+
+
+def split_bam(bam, outbam, flags, threads = 1, memory = "1G", force = False):
+    """
+    bam: bamfile
+    outbam: name of output bam
+    flags: list of flags to filter bam i.e 
+         ["-f 128 -F 16", "-f 80"]
+         will generate two tmp bams then merge them
+    threads: threads to pass to samtools commands
+    memory: memory arg for samtools sort
+    force: if outbam exists overwrite
+    """
+
+    if os.path.isfile(outbam):
+        if not force:
+            sys.exit("{} already exists, set force = True to overwrite".format(outbam))
+
+    tmp_bams = []
+    
+    for idx,flag_cmd in enumerate(flags):
+      tmp_bam = outbam + "_" + str(idx) + ".bam"
+      
+      view_args = [
+              "samtools",
+              "view",
+              "-b",
+              "-@",
+              str(threads),
+              *flag_cmd.split(),
+              "-o",
+              tmp_bam,
+              bam
+      ]
+      call = subprocess.run(view_args,
+              stderr = sys.stderr,
+              stdout = sys.stdout)
+      tmp_bams.append(tmp_bam)
+
+    merge_args = [
+            "samtools",
+            "merge",
+            "-@",
+            str(threads), 
+            "-f", 
+            outbam, 
+            *tmp_bams]
+
+    call = subprocess.run(merge_args,
+              stderr = sys.stderr,
+              stdout = sys.stdout)
+
+    index_args = [
+           "samtools",
+           "index",
+           "-@",
+           str(threads), 
+           outbam
+    ]
+
+    call = subprocess.run(index_args,
+              stderr = sys.stderr,
+              stdout = sys.stdout)
+   
+    for tmp in tmp_bams:
+      os.unlink(tmp)
+
+    
+
+

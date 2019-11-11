@@ -19,6 +19,7 @@ import pysam
 import atexit
 import dask.dataframe as dd
 import binascii
+import pdb
 
 from contextlib import ExitStack
 from datetime import datetime
@@ -36,6 +37,25 @@ bp_dict = {
         "C" : "G",
         "G" : "C"}
 
+
+
+tbl_cols = [
+ "chr",
+ "pos",
+ "strand", 
+ "ref_base",
+ "depth",
+ "refcount",
+ "acount",
+ "ccount",
+ "gcount",
+ "tcount",
+ "mmcount",
+ "indelcount",
+ "mismatch_ratio",
+ "indel_ratio",
+ "mutation_ratio",
+ "stderr"]
 
 def generate_pileup(bam, fasta, min_depth, deletion_length, 
                     additional_args, samflag, libtype, outpre, region = "", verbose = False):
@@ -515,6 +535,15 @@ def write_pileup(df, output_fn):
                header = False, 
                index = False)
 
+def write_pileup_df(df, output_fn):
+    
+    df.to_csv(output_fn, 
+              compression = "gzip",
+              mode = 'a', 
+              sep = "\t",
+              header = False, 
+              index = False)
+
 def generate_bedgraphs(pileup_fn, depth, outpre, threads, nucleotides,
         chunk_size = 1000000):
    """ master function for generating bedgraphs in parallel """
@@ -538,6 +567,49 @@ def generate_bedgraphs(pileup_fn, depth, outpre, threads, nucleotides,
        write_bedgraphs(res[0], res[1])
        write_pileup(res[2], res[3])
 
+def mismatch_stats(df, min_depth, nucs_to_keep):
+    
+    df = df.assign(mismatch_ratio = lambda df: df.mmcount / df.depth)
+    df = df.assign(indel_ratio = lambda df: df.indelcount / df.depth)
+    df = df.assign(mutation_ratio = lambda df: (df.mmcount + df.indelcount) / df.depth)
+    df = df.assign(stderr = lambda df:
+            (np.sqrt(df.mutation_ratio) / np.sqrt(df.depth)))
+    
+    df = df[df.depth >= min_depth]
+    df = df[df.ref_base.isin(nucs_to_keep)]
+    
+    return df
+
+def calc_mismatch_stats(pileup_fn, depth, outpre, threads, nucleotides,
+        chunk_size = 1000000):
+   
+   output_fn = os.path.splitext(pileup_fn)[0] + ".tmp"
+   
+   ## read in pileup table in chunks to keep memory low
+   try:
+       reader = pd.read_csv(pileup_fn, 
+           sep = "\t",
+           compression = 'gzip',
+           chunksize = chunk_size, 
+           iterator = True)
+   except pd.errors.EmptyDataError:
+       fout = gzip.open(output_fn, 'wt')
+       fout.close()
+       return output_fn
+
+   ## apply multithreading if cpus available
+   pool = mp.Pool(threads)
+   
+   func = partial(mismatch_stats,
+            min_depth = depth,
+            nucs_to_keep = nucleotides)
+   
+   ## res is a list of pandas df's and output filenames
+   for res in pool.imap(func, reader):
+       write_pileup_df(res, output_fn)
+   
+   return output_fn
+
 def compute_chunks(n_lines, n_default_lines = 100000):
     """
     check ulimit and split lines into 
@@ -559,79 +631,31 @@ def compute_chunks(n_lines, n_default_lines = 100000):
 
 
 def merge_pileup_tables(pileup_fns, output_pileup_fn, tmp_dir, 
-        min_depth = 1, outformat = "hdf", threads = 1, verbose = True):
+        threads = 1, out_colnames = tbl_cols, verbose = True):
     """ sort and merge the sense and antisense pileup tables
     samtools returns pileup format sorted by largest chromosome in 
     descending order
-    values for duplicated intervals then can be summed in one pass
-    see https://stackoverflow.com/questions/23450145/sort-a-big-file-with-python-heapq-merge
     """
     
     if verbose:
         print("started concatenating anti-sense and sense pileup tables",
               file = sys.stderr)
-              
+        
     ## concat the pileup tables
-    out_tmp_ptable = os.path.join(tmp_dir, "tmp_pileup_table.tsv.gz")
-    
-    with gzip.open(out_tmp_ptable, 'wt', compresslevel = 6) as out_tmp_ptable_fn:
+    output_tmp_fn = os.path.join(tmp_dir, "tmp_table.tsv")
+    with gzip.open(output_tmp_fn, 'wt', compresslevel = 6) as out_fh:
+      out_fh.write("\t".join(out_colnames) + "\n")
       for idx, pfn in enumerate(pileup_fns):
-        fn = gzip.open(pfn, 'rt')
-        
-        if idx == 0:
-          header = fn.readline()
-          shutil.copyfileobj(fn, out_tmp_ptable_fn)
-        else:
-          tmp = fn.readline()
-          shutil.copyfileobj(fn, out_tmp_ptable_fn)
-        
-        fn.close()
+        fh = gzip.open(pfn, 'rt')
+        shutil.copyfileobj(fh, out_fh)
+        fh.close()
     
-    out_tmp_sorted_ptable = unix_sort(out_tmp_ptable, tmp_dir, threads,
-            memory = "8G", verbose = verbose)
-
-    os.unlink(out_tmp_ptable) 
-    if verbose:
-        print("summing up columns from sorted tables",
-              file = sys.stderr)
-    
-    cols = header.rstrip().split("\t")
-    df = pd.read_csv(out_tmp_sorted_ptable, names = cols, sep = "\t",
-            nrows = 10)
-
-    if df.shape[0] > 0:
-      df = dd.read_csv(out_tmp_sorted_ptable, names = cols, sep = "\t")
-      df = df.groupby(['chr', 'pos', 'strand', 'ref_base']).sum().compute(num_workers = threads)
-      df = df.reset_index()
-      df = df[df.depth >= min_depth]
-    
-    if outformat is "hdf":
-        df.to_hdf(output_pileup_fn, 'df', format = 'table')
-    else:
-        df.to_csv(output_pileup_fn, sep = "\t", index = False)
-
-    os.unlink(out_tmp_sorted_ptable)
-    for f in pileup_fns:
-      os.unlink(f)
-
-tbl_cols = [
- "chr",
- "pos",
- "strand", 
- "ref_base",
- "depth",
- "refcount",
- "acount",
- "ccount",
- "gcount",
- "tcount",
- "mmcount",
- "indelcount",
- "mismatch_ratio",
- "indel_ratio",
- "mutation_ratio",
- "stderr",
- "start"]
+    ## sort 
+    out_tmp_sorted_ptable = unix_sort(output_tmp_fn, 
+            output_pileup_fn, 
+            threads,
+            memory = "8G", 
+            verbose = verbose)
 
 def format_tbls(fn1, fn2, outfn):
      
@@ -783,7 +807,7 @@ def main():
                         '--verbose',
                         help="""print run information (default: %(default)s)\n""",
                         action = 'store_true')
-
+    
     parser.add_argument('-k',
                         '--keep-temp-files',
                         help="""don't delete temp files (default: %(default)s)\n""",
@@ -831,7 +855,7 @@ def main():
     strandedness = args.strandedness
     skip_singles = args.skip_single_reads
     chroms_to_skip = args.chroms_to_skip
-
+    
     #### check options
     if not os.path.isfile(bam_name) or not os.path.isfile(fasta_name):
         sys.exit("input bam {} or fasta {} not found".format(bam_name,
@@ -859,7 +883,7 @@ def main():
        os.makedirs(outdir)
        
     ## make tmp directory
-    tmp_dir = os.path.join(outdir, "tmpfiles-" + str(uuid.uuid4()))
+    tmp_dir = os.path.join(outdir, "tmpfiles")
     if not os.path.exists(tmp_dir): 
       os.makedirs(tmp_dir)
       if verbose:
@@ -883,56 +907,49 @@ def main():
     
     for align_type,flags in bam_flags.items():
       tmp_pileup_tbls = []
-      for idx, bam_flag in enumerate(flags):
-        bam_flag_filter = bam_flag
-        pileup_fn = os.path.join(tmp_dir, align_type + "_" + str(idx))
-        if not os.path.exists(pileup_fn): 
-          os.makedirs(pileup_fn)
+      
+      # split out antisense/sense bam as tmp file
+      tmp_bam = os.path.join(tmp_dir, align_type + ".bam")
+      split_bam(bam_name, tmp_bam, flags, threads = threads, memory = "1G")
+
+      pileup_fn = os.path.join(tmp_dir, align_type)
+      if not os.path.exists(pileup_fn): 
+        os.makedirs(pileup_fn)
           
-        pileup_tbl = generate_mismatch_profile(bam_name, 
+      pileup_tbl = generate_mismatch_profile(tmp_bam, 
           fasta_name, 
           pileup_args,
-          1,
+          depth,
           pileup_fn,
           threads,
           deletion_length,
-          bam_flag_filter,
+          " ",
           align_type,
           chroms_to_skip,
           verbose) 
         
-        tmp_pileup_tbls.append(pileup_tbl)
           
-      tmp_output_pileup_fn = os.path.join(tmp_dir, "pileup_table_" +
-              align_type + ".tsv.gz")
-      merge_pileup_tables(tmp_pileup_tbls, tmp_output_pileup_fn, tmp_dir,
-              depth, 
-              "gzip", 
-              threads, verbose)
-      pileup_tbls.append(tmp_output_pileup_fn)
+      pileup_tbls.append(pileup_tbl)
 
-    output_pileup_fn = os.path.join(tmp_dir, "pileup_table.hd5")
-    merge_pileup_tables(pileup_tbls, output_pileup_fn, tmp_dir, depth,
-            "hdf",
-            threads, verbose)
-
-    print("parsing pileup into bedgraph format", file = sys.stderr)
-
-    ## parse output into bedgraphs
-    generate_bedgraphs(output_pileup_fn, depth, tmp_dir, threads, nucleotides)
     
-    format_tbls(os.path.join(tmp_dir, "pos_pileup_all.tmp"), 
-                os.path.join(tmp_dir, "neg_pileup_all.tmp"),
-                outpre + "pileup_table.tsv.gz")
+    new_pileups = []
+    for pileup in pileup_tbls:
+      new_pileup = calc_mismatch_stats(pileup, 
+                          depth,
+                          tmp_dir,
+                          threads,
+                          nucleotides)
+      new_pileups.append(new_pileup)
 
-    print("merging redundant bedgraph entries", file = sys.stderr)
-    
-    ## merge redundant intervals
-    merge_bedgraphs(tmp_dir, ["pos_", "neg_"], outpre, threads)
-    
-    ## bgzip and index
-    out_tbl = outpre + "pileup_table.tsv.gz" 
-    out_bgzip = bgzip(out_tbl)        
+    #pdb.set_trace()
+
+    print("merging and sorting pileup tables", file = sys.stderr)
+    output_pileup_fn = outpre + "pileup_table.tsv.gz"
+    merge_pileup_tables(new_pileups, output_pileup_fn, tmp_dir, 
+            threads, verbose = verbose)
+
+    #### bgzip and index
+    out_bgzip = bgzip(output_pileup_fn)        
     pysam.tabix_index(out_bgzip, 
                       seq_col = 0, 
                       start_col = 1,
