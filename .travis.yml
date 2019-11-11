@@ -1,0 +1,23 @@
+language: python
+
+addons:
+  apt:
+    packages:
+      - libbz2-dev 
+      - zlib1g-dev
+      - libncurses5-dev
+      - liblzma-dev
+      - libncursesw5-dev
+      - gcc
+
+before_install:
+    - .travis/install_deps.sh
+         
+python:
+  - "3.6"
+
+install:
+  - pip install -r src/requirements.txt
+
+script:
+  - cd src; bash run_tests.sh -c 
