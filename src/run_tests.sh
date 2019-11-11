@@ -32,7 +32,8 @@ base_counter.py \
     -t 2 \
     -o "test_data/base_counter/fwd_" \
     -L 'paired' \
-    -d 100  
+    -d 100 \
+    -v
 
 base_counter.py \
     -b test_data/small.rev.bam \
@@ -41,7 +42,8 @@ base_counter.py \
     -t 2 \
     -o "test_data/base_counter/rev_" \
     -L 'paired' \
-    -d 100 
+    -d 100 \
+    -v
 
 base_counter.py \
     -b test_data/small.bam \
@@ -51,6 +53,8 @@ base_counter.py \
     -o "test_data/base_counter/both_" \
     -L 'paired' \
     -d 100 \
-    -k 
+    -k \
+    -v
+
 pytest .
 

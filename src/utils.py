@@ -146,7 +146,7 @@ def unix_sort(in_fn, out_fn, threads, memory = "8G", verbose = False):
     gzip_output.wait()
 
     if verbose:
-        print("sort command is:\n" + " ".join(output.args), file = sys.stderr)
+        print("sort command is:\n" + " ".join(sort_output.args), file = sys.stderr)
 
     out_fh.close()
     return out_fn
