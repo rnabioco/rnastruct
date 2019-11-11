@@ -8,6 +8,7 @@ addons:
       - libncurses5-dev
       - liblzma-dev
       - libncursesw5-dev
+      - libcurl4-openssl-dev
       - gcc
 
 before_install:
@@ -22,6 +23,7 @@ python:
   - "3.6"
 
 install:
+  - pip install Cython
   - pip install -r src/requirements.txt
 
 script:
