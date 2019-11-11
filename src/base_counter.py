@@ -678,7 +678,12 @@ def main():
 
     parser.add_argument('-b',
                         '--bam',
-                        help ="""indexed bam file input
+                        help ="""indexed bam file input,
+                        by default the bam will be split into
+                        forward and reverse bams,
+                        pass the forward and reverse bams
+                        to bypass splitting the bams
+                        (i.e. forward.bam,reverse.bam)
                         \n""",
                         required = True)
     parser.add_argument('-f',
@@ -832,7 +837,10 @@ def main():
     args = parser.parse_args()
     
     bam_name = args.bam
-    
+    split_bams = True
+    if len(bam_name.split(",")) == 2:
+       split_bams = False
+
     ### check system exectuables
     
     if not is_tool("samtools"):
@@ -857,9 +865,15 @@ def main():
     chroms_to_skip = args.chroms_to_skip
     
     #### check options
-    if not os.path.isfile(bam_name) or not os.path.isfile(fasta_name):
-        sys.exit("input bam {} or fasta {} not found".format(bam_name,
-            fasta_name))
+    if not os.path.isfile(fasta_name):
+        sys.exit("input fasta {} not found".format(fasta_name))
+
+    if not os.path.isfile(bam_name):
+        found = False
+        if not split_bams:
+            found = all([os.path.isfile(x) for x in bam_name.split(",")])
+        if not found:
+            sys.exit("input bam {} not found".format(bam_name))
     
     library_opts = ['single', 'paired']
     stranded_opts = ['fr-firststrand', 'fr-secondstrand', 'unstranded']
@@ -896,9 +910,14 @@ def main():
     atexit.register(cleanup, tmp_dir, delete = args.keep_temp_files)
 
     #### parse library type  
-    bam_flags = parse_library_type(bam_name, strandedness, library,
+    if split_bams:
+        bam_flags = parse_library_type(bam_name, strandedness, library,
             skip_singles)
-    
+    else:
+        bam_flags = {}
+        bam_flags["sense"] = bam_name.split(",")[0]
+        bam_flags["antisense"] = bam_name.split(",")[1]
+
     ## pass bams with proper flags to filter to pos and neg alignments
     ## based on library type
     ## merge tables and filter for depth for sense and antisense
@@ -909,9 +928,12 @@ def main():
       tmp_pileup_tbls = []
       
       # split out antisense/sense bam as tmp file
-      tmp_bam = os.path.join(tmp_dir, align_type + ".bam")
-      split_bam(bam_name, tmp_bam, flags, threads = threads, memory = "1G")
-
+      if split_bams:
+          tmp_bam = os.path.join(tmp_dir, align_type + ".bam")
+          split_bam(bam_name, tmp_bam, flags, threads = threads, memory = "1G")
+      else:
+          tmp_bam = flags
+      
       pileup_fn = os.path.join(tmp_dir, align_type)
       if not os.path.exists(pileup_fn): 
         os.makedirs(pileup_fn)
@@ -927,7 +949,6 @@ def main():
           align_type,
           chroms_to_skip,
           verbose) 
-        
           
       pileup_tbls.append(pileup_tbl)
 
