@@ -11,8 +11,13 @@ addons:
       - gcc
 
 before_install:
-    - ./.travis/install_deps.sh
-         
+    - "export PATH=$PWD/.travis:$PWD/bin:$PATH"
+    - "mkdir -p deps && cd deps && source install_deps.sh && cd .."
+    - "pwd"
+    - "echo $HOME"
+    - "echo $PATH"
+    - "find deps -executable -type f"
+
 python:
   - "3.6"
 
