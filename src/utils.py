@@ -204,7 +204,7 @@ def external_sort(out_tmp_ptable, tmp_dir, nlines, verbose = False):
 
 
 
-def split_bam(bam, outbam, flags, threads = 1, memory = "1G", force = False):
+def split_bam(bam, outbam, flags, threads = 1, memory = "2G", force = True):
     """
     bam: bamfile
     outbam: name of output bam
@@ -216,7 +216,7 @@ def split_bam(bam, outbam, flags, threads = 1, memory = "1G", force = False):
     force: if outbam exists overwrite
     """
      
-    idx_threads = min(threads, 4)
+    idx_threads = min(threads, 8)
     view_threads = threads
     merge_threads = threads
 
@@ -269,7 +269,37 @@ def split_bam(bam, outbam, flags, threads = 1, memory = "1G", force = False):
     call = subprocess.run(index_args,
               stderr = sys.stderr,
               stdout = sys.stdout)
-   
+    
+    if call.returncode != 0:
+      
+      print("error detected in indexing, trying to sort then reindexing", 
+              file = sys.stderr)
+      tmpbam = outbam + ".tmp.bam"
+      sort_args = [
+              "samtools",
+              "sort", 
+              "-@",
+              str(threads),
+              "-m",
+              memory,
+              "-o",
+              tmpbam,
+              outbam
+              ]
+      call = subprocess.run(sort_args,
+              stderr = sys.stderr,
+              stdout = sys.stdout)
+      
+      if call.returncode != 0:
+          sys.exit("problem splitting bam, exiting")
+      else:
+          os.unlink(outbam)
+          os.rename(tmpbam, outbam)
+
+          call = subprocess.run(index_args,
+                  stderr = sys.stderr,
+                  stdout = sys.stdout)
+
     for tmp in tmp_bams:
       os.unlink(tmp)
 
