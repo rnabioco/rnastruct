@@ -26,7 +26,7 @@ from collections import Counter
 from functools import partial
 from shutil import which
 from operator import itemgetter
-from count_mutations import Interval
+from base_counter import Interval
 
 class StrandedInterval:
     """ stranded bed interval object """
