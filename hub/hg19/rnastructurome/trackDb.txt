@@ -8,7 +8,7 @@ superTrack on show
     parent rnastructurome
     shortName RNAed
     longName rnastructurome ed
-    visibility full
+    visibility hide
     maxHeightPixels 100:30:8
     compositeTrack on
     autoScale on
@@ -37,7 +37,7 @@ superTrack on show
     parent rnastructurome
     shortName RNAfmfe
     longName rnastructurome fmfe
-    visibility full
+    visibility hide
     maxHeightPixels 100:30:8
     compositeTrack on
     autoScale on
@@ -66,7 +66,7 @@ superTrack on show
     parent rnastructurome
     shortName RNAmfe
     longName rnastructurome mfe
-    visibility full
+    visibility hide
     maxHeightPixels 100:30:8
     compositeTrack on
     autoScale on
@@ -95,7 +95,7 @@ superTrack on show
     parent rnastructurome
     shortName RNApvalue
     longName rnastructurome pvalue
-    visibility full
+    visibility hide
     maxHeightPixels 100:30:8
     compositeTrack on
     autoScale on
@@ -124,7 +124,7 @@ superTrack on show
     parent rnastructurome
     shortName RNAzscore
     longName rnastructurome zscore
-    visibility full
+    visibility hide
     maxHeightPixels 100:30:8
     compositeTrack on
     autoScale on

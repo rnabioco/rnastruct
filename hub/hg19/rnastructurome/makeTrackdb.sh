@@ -24,7 +24,7 @@ do
     echo "    parent rnastructurome"
     echo "    shortName RNA"$metric
     echo "    longName rnastructurome $metric"
-    echo "    visibility full" 
+    echo "    visibility hide" 
     echo "    maxHeightPixels 100:30:8"
     echo "    compositeTrack on"
     echo "    autoScale on"

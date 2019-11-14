@@ -42,54 +42,58 @@ superTrack on show
 shortLabel Nascent RNA
 longLabel Nascent RNA-seq coverage
 
-    track WT_coverage 
+    track coverage 
     parent nascent_coverage
-    container multiWig
+    compositeTrack on show
     shortLabel WildType
     longLabel WT nascent rna seq 
     visibility full 
     maxHeightPixels 100:30:8
-    autoscale on
-    aggregate transparentOverlay
+    autoscale group
+    subGroup1 polII PolII WT=Wild_type C4=Slow_Mutant
+    subGroup2 strand Strand pos=Positive neg=Negative
+    dimension dimX=polII dimY=strand
+    dimensionXchecked Wild_type
     type bigWig  
+    sortOrder strand=- polII=-
   
         track WT_plus
         bigDataUrl http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/coverage/WTpos_depth.bb
         shortLabel WT_plus_strand
-        longLabel WT plus strand
-        parent WT_coverage
+        longLabel Nascent RNA (WT +) 
+        parent coverage
+        subGroups polII=WT strand=pos
         type bigWig
+        maxHeightPixels 30:30:10
+        color 255,0,0
         
         track WT_negative
         bigDataUrl http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/coverage/WTneg_depth.bb
         shortLabel WT_neg_strand
-        longLabel WT negative strand
-        parent WT_coverage
+        longLabel Nascent RNA (WT -) 
+        parent coverage
+        subGroups polII=WT strand=neg
         type bigWig
-    
-    
-    track C4_coverage 
-    parent nascent_coverage
-    container multiWig
-    shortLabel Slow
-    longLabel Slow nascent rna seq 
-    maxHeightPixels 100:30:8
-    visibility full 
-    aggregate transparentOverlay
-    autoscale on
-    type bigWig 
+        maxHeightPixels 30:30:10
+        color 255,0,0
     
         track C4_plus
         bigDataUrl http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/coverage/C4pos_depth.bb
         shortLabel C4_plus_strand
-        longLabel C4 plus strand
-        parent C4_coverage
+        longLabel Nascent RNA (Slow +) 
+        parent coverage
+        subGroups polII=C4 strand=pos
         type bigWig
+        maxHeightPixels 30:30:10
+        color 67,205,128 
         
         track C4_negative
         bigDataUrl http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/coverage/C4neg_depth.bb
         shortLabel C4_neg_strand
-        longLabel C4 negative strand
-        parent C4_coverage
+        longLabel Nascent RNA (Slow -) 
+        parent coverage
+        subGroups polII=C4 strand=neg
         type bigWig
+        maxHeightPixels 30:30:10
+        color 67,205,128 
   

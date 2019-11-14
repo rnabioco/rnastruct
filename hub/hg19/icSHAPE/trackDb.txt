@@ -1,0 +1,155 @@
+
+track icShape 
+superTrack on show
+shortLabel icShape 
+longLabel icShape Reactivities 
+
+    track icShapeData
+    parent icShape 
+    compositeTrack on show
+    shortLabel icShapeReactivities 
+    longLabel icShape HEK293T Reactivites 
+    type bigWig
+    autoScale group 
+    windowingFunction mean
+    visibility full 
+    maxHeightPixels 100:30:8
+    subGroup1 source Source vivo=In_Vivo vitro=In_Vitro
+    subGroup2 region Region cy=Cytoplasm np=Nucleoplasm ch=Chromatin
+    subGroup3 strand Strand plus=Positive minus=Negative
+    dimensions dimX=source dimY=region dimA=strand
+    dimensionXchecked In_Vivo
+    sortOrder region=+ source=-
+
+   track hek_ch_vitro_minus
+   parent icShapeData
+   shortLabel hek_ch_vitro_minus
+   bigDataUrl       http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/icSHAPE/hek_ch_vitro_minus.bw
+   longLabel  icShape (ch vitro minus)
+   subGroups source=vitro region=ch strand=minus
+   maxHeightPixels 30:30:10
+   visibility hide
+   color 67,205,128
+   type bigWig
+
+   track hek_ch_vitro_plus
+   parent icShapeData
+   shortLabel hek_ch_vitro_plus
+   bigDataUrl       http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/icSHAPE/hek_ch_vitro_plus.bw
+   longLabel  icShape (ch vitro plus)
+   subGroups source=vitro region=ch strand=plus
+   maxHeightPixels 30:30:10
+   visibility hide
+   color 255,0,0
+   type bigWig
+
+   track hek_ch_vivo_minus
+   parent icShapeData
+   shortLabel hek_ch_vivo_minus
+   bigDataUrl       http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/icSHAPE/hek_ch_vivo_minus.bw
+   longLabel  icShape (ch vivo minus)
+   subGroups source=vivo region=ch strand=minus
+   maxHeightPixels 30:30:10
+   visibility full
+   color 67,205,128
+   type bigWig
+
+   track hek_ch_vivo_plus
+   parent icShapeData
+   shortLabel hek_ch_vivo_plus
+   bigDataUrl       http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/icSHAPE/hek_ch_vivo_plus.bw
+   longLabel  icShape (ch vivo plus)
+   subGroups source=vivo region=ch strand=plus
+   maxHeightPixels 30:30:10
+   visibility full
+   color 255,0,0
+   type bigWig
+
+   track hek_cy_vitro_minus
+   parent icShapeData
+   shortLabel hek_cy_vitro_minus
+   bigDataUrl       http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/icSHAPE/hek_cy_vitro_minus.bw
+   longLabel  icShape (cy vitro minus)
+   subGroups source=vitro region=cy strand=minus
+   maxHeightPixels 30:30:10
+   visibility hide
+   color 67,205,128
+   type bigWig
+
+   track hek_cy_vitro_plus
+   parent icShapeData
+   shortLabel hek_cy_vitro_plus
+   bigDataUrl       http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/icSHAPE/hek_cy_vitro_plus.bw
+   longLabel  icShape (cy vitro plus)
+   subGroups source=vitro region=cy strand=plus
+   maxHeightPixels 30:30:10
+   visibility hide
+   color 255,0,0
+   type bigWig
+
+   track hek_cy_vivo_minus
+   parent icShapeData
+   shortLabel hek_cy_vivo_minus
+   bigDataUrl       http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/icSHAPE/hek_cy_vivo_minus.bw
+   longLabel  icShape (cy vivo minus)
+   subGroups source=vivo region=cy strand=minus
+   maxHeightPixels 30:30:10
+   visibility hide
+   color 67,205,128
+   type bigWig
+
+   track hek_cy_vivo_plus
+   parent icShapeData
+   shortLabel hek_cy_vivo_plus
+   bigDataUrl       http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/icSHAPE/hek_cy_vivo_plus.bw
+   longLabel  icShape (cy vivo plus)
+   subGroups source=vivo region=cy strand=plus
+   maxHeightPixels 30:30:10
+   visibility hide
+   color 255,0,0
+   type bigWig
+
+   track hek_np_vitro_minus
+   parent icShapeData
+   shortLabel hek_np_vitro_minus
+   bigDataUrl       http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/icSHAPE/hek_np_vitro_minus.bw
+   longLabel  icShape (np vitro minus)
+   subGroups source=vitro region=np strand=minus
+   maxHeightPixels 30:30:10
+   visibility hide
+   color 67,205,128
+   type bigWig
+
+   track hek_np_vitro_plus
+   parent icShapeData
+   shortLabel hek_np_vitro_plus
+   bigDataUrl       http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/icSHAPE/hek_np_vitro_plus.bw
+   longLabel  icShape (np vitro plus)
+   subGroups source=vitro region=np strand=plus
+   maxHeightPixels 30:30:10
+   visibility hide
+   color 255,0,0
+   type bigWig
+
+   track hek_np_vivo_minus
+   parent icShapeData
+   shortLabel hek_np_vivo_minus
+   bigDataUrl       http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/icSHAPE/hek_np_vivo_minus.bw
+   longLabel  icShape (np vivo minus)
+   subGroups source=vivo region=np strand=minus
+   maxHeightPixels 30:30:10
+   visibility hide
+   color 67,205,128
+   type bigWig
+
+   track hek_np_vivo_plus
+   parent icShapeData
+   shortLabel hek_np_vivo_plus
+   bigDataUrl       http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/icSHAPE/hek_np_vivo_plus.bw
+   longLabel  icShape (np vivo plus)
+   subGroups source=vivo region=np strand=plus
+   maxHeightPixels 30:30:10
+   visibility hide
+   color 255,0,0
+   type bigWig
+

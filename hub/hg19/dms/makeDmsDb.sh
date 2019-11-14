@@ -14,9 +14,9 @@ longLabel Normalized DMS reactivity
     shortLabel DMS_reactivity_bigwigs 
     longLabel DMS reactivitity scores
     type bigWig
-    autoScale on
+    autoScale group 
     windowingFunction mean
-    visibility hide 
+    visibility full 
     maxHeightPixels 100:30:8
     subGroup1 polII PolII WT=Wild_type C4=Slow_Mutant 
     subGroup2 norm Normalization_method norm=Global \
@@ -26,11 +26,10 @@ longLabel Normalized DMS reactivity
     dimensionXchecked Wild_type
     sortOrder strand=- polII=-
 "
-##
 
 states=("WT" "C4") 
 colors=("255,0,0" "67,205,128" "155,48,255" "25,25,112" "0,0,255" "255,165,0")
-#prefix_for_state=("A_" "B_" "C_" "D_" "E_" "F_")
+
 #set counter to grab color by index
 color_idx=0
 
@@ -56,7 +55,7 @@ do
         bgsub=$(echo $file | grep -c "bgsub")
         norm=$(echo $file | grep -c "norm")
         pos_neg=$(echo $file | grep -c "pos")
-
+        
         if [ $raw -eq 1 ]
         then
             method="raw"
@@ -70,7 +69,7 @@ do
             method="norm"
         
         else 
-            echo "Filename not found to be medulla hypothamalus or brain the rest"  >&2
+            echo "Filename not parsable"  >&2
             exit 1
         
         fi
@@ -85,15 +84,15 @@ do
         
         trackname=$(basename $file .bw) 
 
-        echo "track $trackname"
-        echo "parent dms_bigwigs"
-        echo "shortLabel $trackname"
-        echo "bigDataUrl http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/dms/$file"
-        echo "longLabel  $trackname"  
-        echo "subGroups polII=$state norm=$method strand=$strand"
-        echo "maxHeightPixels 30:30:10"
-        echo "color $color"
-        echo "type bigWig"
+        echo "    track $trackname"
+        echo "    parent dms_bigwigs"
+        echo "    shortLabel $trackname"
+        echo "    bigDataUrl http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/dms/$file"
+        echo "    longLabel  DMS reactivity ($state $strand $method)"  
+        echo "    subGroups polII=$state norm=$method strand=$strand"
+        echo "    maxHeightPixels 30:30:10"
+        echo "    color $color"
+        echo "    type bigWig"
         echo ""
     
    done

@@ -10,9 +10,9 @@ longLabel A-to-I RNA editing
     shortLabel RNAeditingFrequencies 
     longLabel RNAeditingFrequencies 
     type bigWig
-    autoScale on
+    autoScale group 
     windowingFunction mean
-    visibility hide 
+    visibility full 
     maxHeightPixels 100:30:8
     subGroup1 polII PolII WT=Wild_type C4=Slow_Mutant 
     subGroup2 strand Strand pos=Positive neg=Negative
@@ -20,43 +20,43 @@ longLabel A-to-I RNA editing
     dimensionXchecked Wild_type
     sortOrder strand=- polII=-
 
-track WT_edits_neg
-parent rnaedits
-shortLabel WT_edits_neg
-bigDataUrl         http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/editing/WT_edits_neg.bw
-longLabel  WT_edits_neg
-subGroups polII=WT strand=neg
-maxHeightPixels 30:30:10
-color 255,0,0
-type bigWig
+   track WT_edits_neg
+   parent rnaedits
+   shortLabel WT_edits_neg
+   bigDataUrl         http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/editing/WT_edits_neg.bw
+   longLabel  RNA editing (WT -)
+   subGroups polII=WT strand=neg
+   maxHeightPixels 30:30:10
+   color 255,0,0
+   type bigWig
 
-track WT_edits_pos
-parent rnaedits
-shortLabel WT_edits_pos
-bigDataUrl         http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/editing/WT_edits_pos.bw
-longLabel  WT_edits_pos
-subGroups polII=WT strand=pos
-maxHeightPixels 30:30:10
-color 255,0,0
-type bigWig
+   track WT_edits_pos
+   parent rnaedits
+   shortLabel WT_edits_pos
+   bigDataUrl         http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/editing/WT_edits_pos.bw
+   longLabel  RNA editing (WT +)
+   subGroups polII=WT strand=pos
+   maxHeightPixels 30:30:10
+   color 255,0,0
+   type bigWig
 
-track C4_edits_neg
-parent rnaedits
-shortLabel C4_edits_neg
-bigDataUrl         http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/editing/C4_edits_neg.bw
-longLabel  C4_edits_neg
-subGroups polII=C4 strand=neg
-maxHeightPixels 30:30:10
-color 67,205,128
-type bigWig
+   track C4_edits_neg
+   parent rnaedits
+   shortLabel C4_edits_neg
+   bigDataUrl         http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/editing/C4_edits_neg.bw
+   longLabel  RNA editing (C4 -)
+   subGroups polII=C4 strand=neg
+   maxHeightPixels 30:30:10
+   color 67,205,128
+   type bigWig
 
-track C4_edits_pos
-parent rnaedits
-shortLabel C4_edits_pos
-bigDataUrl         http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/editing/C4_edits_pos.bw
-longLabel  C4_edits_pos
-subGroups polII=C4 strand=pos
-maxHeightPixels 30:30:10
-color 67,205,128
-type bigWig
+   track C4_edits_pos
+   parent rnaedits
+   shortLabel C4_edits_pos
+   bigDataUrl         http://amc-sandbox.ucdenver.edu/User33/bentley/hub/hg19/editing/C4_edits_pos.bw
+   longLabel  RNA editing (C4 +)
+   subGroups polII=C4 strand=pos
+   maxHeightPixels 30:30:10
+   color 67,205,128
+   type bigWig
 
