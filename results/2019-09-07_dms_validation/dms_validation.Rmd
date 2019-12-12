@@ -13,9 +13,9 @@ library(broom)
 
 ```{r paths}
 fa_fn <- "~/Projects/shared_dbases/genomes/human/chr_appended_grch37/Homo_sapiens.GRCh37.dna.primary_assembly_chrappended.fa"
-folding_dir <- "all_new_cutoffs_ac"
+folding_dir <- "all_new_cutoffs"
 
-outdir <- "plots/rnastructure/ac_only"
+outdir <- "plots/rnastructure/all_nucs"
 dir.create(outdir, recursive = TRUE)
 
 depths <- c("15", "50", "100", "500")
@@ -86,7 +86,7 @@ all_dat <- pmap(list(all_files, refs),
     map_dfr(~calc_ss_similarity(.x$pred, 
                                   .x$ref, 
                                   .x$seq, 
-                                  count_only_ac = TRUE))
+                                  count_only_ac = FALSE))
   dms_dat <- bind_cols(slim_dat, tmp)
   
   # repeat for predicitions without dms data
@@ -111,7 +111,7 @@ all_dat <- pmap(list(all_files, refs),
     map_dfr(~calc_ss_similarity(.x$pred, 
                                   .x$ref, 
                                   .x$seq, 
-                                  count_only_ac = TRUE))
+                                  count_only_ac = FALSE))
   no_dms_dat <- bind_cols(slim_dat, tmp)
   
   bind_rows(list(
@@ -146,23 +146,30 @@ p
 
 ```{r}
 
-plot_sen_ppv <-
-  function(plt_dat, out_name, outdir, facet_by = NULL,
+plot_sen_ppv <- function(plt_dat,
+           out_name,
+           outdir, 
+           facet_by = NULL,
            cut_var = NULL) {
     tsize = 2
     if (is.null(facet_by)) {
       stat_df <- plt_dat %>%
-        nest(-depth) %>%
+        nest(data = c(treatment, 
+                      pred, ref, 
+                      size, score,
+                      id, seq, sen,
+                      ppv)) %>%
         mutate(
           res = map(data,
                     ~ wilcox.test(sen ~ treatment, data = .)),
           res = map(res, tidy),
-          n = map_int(data, nrow)
+          n = map_int(data, function(x) {length(unique(x$id))})
         ) %>%
         unnest(res) %>%
         mutate(
           sen = max(plt_dat$sen) * 1.1,
-          p.value = paste0("p = ", signif(p.value, 2)),
+          p.value = paste0("n = ", n, "\n",
+                           "p = ", signif(p.value, 2)),
           group = row_number(),
           xend = group - 0.2,
           xstart = group + 0.2,
@@ -192,17 +199,20 @@ plot_sen_ppv <-
         theme(legend.position = "top")
       
       stat_df <- plt_dat %>%
-        nest(-depth) %>%
+        nest(data = c(treatment, pred, 
+                      ref, size, score, 
+                      id, seq, sen, ppv)) %>%
         mutate(
           res = map(data,
                     ~ wilcox.test(ppv ~ treatment, data = .)),
           res = map(res, tidy),
-          n = map_int(data, nrow)
+           n = map_int(data, function(x) {length(unique(x$id))})
         ) %>%
         unnest(res) %>%
         mutate(
           ppv = max(plt_dat$ppv) * 1.1,
-          p.value = paste0("p = ", signif(p.value, 2)),
+          p.value = paste0("n = ", n, "\n",
+                           "p = ", signif(p.value, 2)),
           group = row_number(),
           xend = group - 0.2,
           xstart = group + 0.2,
@@ -233,7 +243,9 @@ plot_sen_ppv <-
     } else {
       # stats
       stat_df <- plt_dat %>%
-        nest(-depth,-level) %>%
+        nest(c(treatment, pred, 
+               ref, size, score,
+               id, seq, sen, ppv)) %>%
         mutate(
           res = map(data,
                     ~ wilcox.test(sen ~ treatment, data = .)),
@@ -289,7 +301,9 @@ plot_sen_ppv <-
       
       # stats
       stat_df <- plt_dat %>%
-        nest(-depth,-level) %>%
+        nest(data = c(treatment, pred,
+               ref, size, score, 
+               id, seq, sen, ppv)) %>%
         mutate(
           res = map(data,
                     ~ wilcox.test(ppv ~ treatment, data = .)),
@@ -345,7 +359,6 @@ plot_sen_ppv <-
     p <- plot_grid(p_sen, p_ppv, nrow = 1, ncol = 2)
     p
     
-    
     save_plot(
       file.path(outdir, out_name),
       p,
@@ -354,10 +367,14 @@ plot_sen_ppv <-
       base_asp = 1.2
     )
     p
-  }
+}
 
 plt_dat <- all_dat
 
+# just plot 15 and 50 for simplicity
+
+plt_dat <- filter(plt_dat, depth %in% c(15, 50))
+  
 plt_dat <- mutate(plt_dat, 
                   depth = factor(depth, 
                         levels = sort(as.numeric(unique(depth)))),
@@ -376,11 +393,13 @@ plot_sen_ppv(plt_dat, "s_ppv_no_filtering.pdf", outdir)
 
 not_perfectly_predicted <- all_dat %>%
   filter(treatment == "no_dms") %>% 
-  filter(sen < 0.75 | ppv < 0.75) %>% 
+  filter(sen < 0.9 | ppv < 0.9) %>% 
   pull(id) %>% 
   unique()
 
 plt_dat <- filter(all_dat, id %in% not_perfectly_predicted)
+
+plt_dat <- filter(plt_dat, depth %in% c(15, 50))
 
 plt_dat <- mutate(plt_dat, 
                   depth = factor(depth, 
@@ -398,11 +417,13 @@ plot_sen_ppv(plt_dat, "s_ppv_filtering.pdf", outdir)
 
 not_perfectly_predicted <- all_dat %>%
   filter(treatment == "no_dms") %>% 
-  filter(sen < 0.75 | ppv < 0.75) %>% 
+  filter(sen < 0.9 | ppv < 0.9) %>% 
   pull(id) %>% 
   unique()
 
 plt_dat <- filter(all_dat, id %in% not_perfectly_predicted)
+plt_dat <- filter(plt_dat, depth %in% c(15, 50))
+
 
 plt_dat <- group_by(plt_dat,
                     depth) %>% 
@@ -435,6 +456,7 @@ not_perfectly_predicted <- all_dat %>%
   unique()
 
 plt_dat <- filter(all_dat, id %in% not_perfectly_predicted)
+plt_dat <- filter(plt_dat, depth %in% c(15, 50))
 
 plt_dat <- group_by(plt_dat,
                     depth) %>% 
@@ -456,196 +478,25 @@ plot_sen_ppv(plt_dat, "s_ppv_filtering_cut_size.pdf", outdir, facet_by = "level"
 
 ```
 
-
-## RNAfold
-
-
-```{r}
-outdir <- "plots/rnafold/A_C"
-dir.create(outdir, showWarnings = FALSE, recursive = TRUE)
-depths <- c("15", "50", "100", "500")
-
-dp_dirs <- file.path(folding_dir, 
-          paste0(depths, "_mapfiles"))
-
-names(depths) <- depths
-
-
-all_files <- map(depths,
-                  function(x){
-  list(dms = file.path(folding_dir, "RNAfold", 
-                       paste0(x, "_rnafold.fasta")),
-
-       no_dms = file.path(folding_dir, "RNAfold", 
-                       paste0(x, "_rnafold_nodms.fasta"))
-       )
-})
-```
-
-
-```{r}
-ref_files <- file.path(folding_dir, paste0(depths, "_cutoff.txt"))
-refs <- map(ref_files, read_tsv, 
-            col_names = c("chrom",
-                          "start",
-                          "end",
-                          "id",
-                          "score",
-                          "strand",
-                          "size",
-                          "ss",
-                          "confidence",
-                          "n_coverage")) %>% 
-  map(~get_sequences(.x, 
-                     fa_fn))
-
-n_slop <- 0
-
-all_dat <- pmap(list(all_files, refs),
-     function(fns, ref){
-  n_cut <- n_slop + 1
-  dat <- read_rnafold(fns$dms) %>% 
-    select(id = header, ss, -seq)
-  
-  merged_dat <- left_join(dat, ref, by = c("id"))
-  
-  slim_dat <- merged_dat %>%
-    select(pred = ss.x,
-           ref = ss.y,
-           size,
-           score,
-           id,
-           seq) %>%
-    mutate(pred = str_sub(pred, n_cut,-n_cut),
-           seq = str_sub(seq, n_cut, -n_cut))
-  
-  tmp <- split(slim_dat, 1:nrow(slim_dat)) %>%
-    map_dfr(~calc_ss_similarity(.x$pred, 
-                                  .x$ref, 
-                                  .x$seq, 
-                                  count_only_ac = TRUE))
-  dms_dat <- bind_cols(slim_dat, tmp)
-  
-  dat <- read_rnafold(fns$no_dms) %>% 
-    select(id = header, ss, -seq)
-    
-  merged_dat <- left_join(dat, ref, by = "id")
-  
-  slim_dat <- merged_dat %>%
-    select(pred = ss.x,
-           ref = ss.y,
-           size,
-           score, 
-           id,
-           seq) %>%
-    mutate(pred = str_sub(pred, n_cut,-n_cut),
-           seq = str_sub(seq, n_cut, -n_cut))
-  
-  tmp <- split(slim_dat, 1:nrow(slim_dat)) %>% map_dfr(~calc_ss_similarity(.x$pred, 
-                                  .x$ref, 
-                                  .x$seq, 
-                                  count_only_ac = TRUE))
-  no_dms_dat <- bind_cols(slim_dat, tmp)
-  
-  bind_rows(list(
-    dms = dms_dat,
-    no_dms = no_dms_dat
-  ), .id = "treatment")
-})
-
-all_dat <- bind_rows(all_dat, .id = "depth")
-       
-
-plt_dat <- all_dat
-
-plt_dat <- mutate(plt_dat, 
-                  depth = factor(depth, 
-                        levels = sort(as.numeric(unique(depth)))),
-         treatment = ifelse(treatment == "dms",
-                            "DMS",
-                            "Untreated") %>% 
-           factor(., levels = c("Untreated", "DMS")))
-
-
-
-plot_sen_ppv(plt_dat, "s_ppv_no_filtering.pdf", outdir)
-
-```
-
-
-```{r, all_no_filter}
-
-not_perfectly_predicted <- all_dat %>%
-  filter(treatment == "no_dms") %>% 
-  filter(sen < 0.75 | ppv < 0.75) %>% 
-  pull(id) %>% 
-  unique()
-
-plt_dat <- filter(all_dat, id %in% not_perfectly_predicted)
-
-plt_dat <- mutate(plt_dat, 
-                  depth = factor(depth, 
-                        levels = sort(as.numeric(unique(depth)))),
-         treatment = ifelse(treatment == "dms",
-                            "DMS",
-                            "Untreated") %>% 
-           factor(., levels = c("Untreated", "DMS")))
-
-plot_sen_ppv(plt_dat, "s_ppv_filtering.pdf", outdir)
-
-```
-
-```{r}
-not_perfectly_predicted <- all_dat %>%
-  filter(treatment == "no_dms") %>% 
-  filter(sen < 0.75 | ppv < 0.75) %>% 
-  pull(id) %>% 
-  unique()
-
-plt_dat <- filter(all_dat, id %in% not_perfectly_predicted)
-
-plt_dat <- group_by(plt_dat,
-                    depth) %>% 
-  mutate(level = cut(size, 
-                     quantile(size), 
-                     include.lowest = TRUE, 
-                     right = FALSE, 
-                     labels = FALSE)) %>% 
-  ungroup() %>% 
-  mutate(depth = factor(depth, 
-                        levels = sort(as.numeric(unique(depth)))),
-         treatment = ifelse(treatment == "dms",
-                            "DMS",
-                            "Untreated") %>% 
-           factor(., levels = c("Untreated", "DMS")))
-
-
-plot_sen_ppv(plt_dat, 
-             "s_ppv_filtering_cut_size.pdf", 
-             outdir, 
-             facet_by = "level", 
-             cut_var = "size")
-
-```
-
-
 ## Find regions with better folding with DMS data
 
 
-```{r, eval = FALSE}
+```{r,}
 not_perfectly_predicted <- all_dat %>%
   filter(treatment == "no_dms") %>% 
-  filter(sen < 0.75 | ppv < 0.75) %>% 
+  filter(sen < 0.9 & ppv < 0.9) %>% 
   pull(id) %>% 
   unique()
 
 plt_dat <- filter(all_dat, id %in% not_perfectly_predicted)
+plt_dat <- filter(plt_dat, depth %in% c(15, 50))
 
-d_dat <- plt_dat %>% filter(depth == 100, size > 20) %>% 
+
+d_dat <- plt_dat %>% filter(depth == 15, size > 20) %>% 
   select(-depth) %>% 
   filter(treatment == "dms")
 
-ut_dat <- plt_dat %>% filter(depth == 100, size > 20) %>% 
+ut_dat <- plt_dat %>% filter(depth == 15, size > 20) %>% 
   select(-depth) %>% 
   filter(treatment != "dms")
 
@@ -661,49 +512,120 @@ dat <- mutate(dat,
               delta_ppv = ppv_dms - ppv_ut,
               delta_sen = sen_dms - sen_ut)
 
-outdir <- "examples"
-dir.create(outdir)
-plot_pred <- function(df){
-  map_dat <- read_map(file.path(folding_dir, "100_mapfiles", 
+dat <- select(dat, 
+              pred_dms,
+              pred_ut, 
+              ref, 
+              everything())
+
+dat <- filter(dat, 
+              delta_ppv > 0.25, 
+              delta_sen > 0.25)
+
+
+library(txcompare)
+gtf <- tidy_gtf("~/Projects/shared_dbases/annotation/human/gencode.v31lift37.basic.annotation.gtf") 
+  
+ref <- refs[[1]] %>% 
+  group_by(strand)
+
+gtf <- group_by(gtf, strand) 
+
+ref_annotated <- bed_intersect(ref, gtf, suffix = c("", ".y"))
+
+ref_annotated <- ref_annotated %>% 
+  group_by(id) %>% 
+  dplyr::slice(1) %>% 
+  ungroup() %>% 
+  mutate(id, new_id = str_c(gene_name.y, "_", chrom, ":", start, "-", end)) %>% 
+  select(id, new_id) %>% 
+  unique() %>% 
+  group_by(id)
+
+dat <- left_join(dat, ref_annotated, by = "id")
+```
+
+```{r}
+
+
+
+plot_pred <- function(df, 
+                      folding_dir = "all_new_cutoffs/15_rnastruct_mapfiles",
+                      outdir = "."){
+  map_dat <- read_map(file.path(folding_dir, 
                                 paste0(df$id, "_coverage.map")))
   
   plot_secondary_structure(df$seq, 
                            df$ref,
                            color_by = map_dat$react,
                            outpath = file.path(outdir,
-                                               paste0(df$id, 
-                                                      "_evofold.png"))
+                                               paste0(df$new_id, 
+                                                      "_evofold.png")),
+                           windsorize = FALSE
                            )
   
   plot_secondary_structure(df$seq, 
                            df$pred_dms,
                            color_by = map_dat$react,
                            outpath = file.path(outdir,
-                                               paste0(df$id, 
-                                                      "_with_dms.png"))
+                                               paste0(df$new_id, 
+                                                      "_with_dms.png")),
+                           windsorize = FALSE
                            )
   
     plot_secondary_structure(df$seq, 
                            df$pred_ut,
                            color_by = NULL,
                            outpath = file.path(outdir,
-                                               paste0(df$id, 
-                                                      "_without_dms.png"))
+                                               paste0(df$new_id, 
+                                                      "_without_dms.png")),
+                           windsorize = FALSE
                            )
+    
+    outfilenames <- c(
+      "_without_dms.png",
+      "_with_dms.png",
+      "_evofold.png")
+    
+    outfiles <-  file.path(outdir, paste0(df$new_id,  outfilenames))
+
+  montage_args <- c(
+    "-label",
+    "%t",
+    outfiles,
+    "-pointsize", 128,
+    "-tile", "x1",
+    "-geometry", "+2+2",
+    file.path(outdir, paste0(df$new_id, "_combined.png"))) 
+
+  system2("montage",
+        montage_args)
+  
+  unlink(outfiles)
+
 }
 
 
 to_plot <- c(
-  "1022231_0_+_95", # CLTC CDS
-  "1495619_0_+_59", # HMGXB4 3UTR
-  "491952.0_0_-_92", # FBXL14 CDS
-  "1932934_0_-_135" #FBN2 CDS)
+  #"2002388.10_1_-_200",
+  "1098335_0_+_74",
+  "302307.3_0_+_100",
+  "1547267_0_+_79",
+  "1047271_0_+_69",
+  "1112227_1_+_64"
 )
+
+# to_plot <- c(
+#   "1022231_0_+_95", # CLTC CDS
+#   "1495619_0_+_59", # HMGXB4 3UTR
+#   "491952.0_0_-_92", # FBXL14 CDS
+#   "1932934_0_-_135" #FBN2 CDS)
+# )
 plt_dat <- filter(dat, id %in% to_plot)
 
-walk(split(plt_dat, 1:nrow(plt_dat)), plot_pred)
-
-filter(refs[[3]], id %in% to_plot)
+outdir = "plots/rnastructure/all_nucs/examples"
+dir.create(outdir)
+walk(split(plt_dat, 1:nrow(plt_dat)),
+     ~plot_pred(.x, outdir = outdir))
 ```
-
 

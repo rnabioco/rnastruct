@@ -48,7 +48,7 @@ chroms_to_check <- c(
 )
 
 comp_rnastructurome_and_ss <- function(chrom_to_test = chroms_to_check[20], 
-                                       ss_file = rep2,
+                                       ss_file = wt_rep2,
                                        fwd_bw = fwd_zscore_file,
                                        rev_bw = rev_zscore_file,
                                        min_combined_reads = 50){
@@ -73,7 +73,16 @@ comp_rnastructurome_and_ss <- function(chrom_to_test = chroms_to_check[20],
                                        na.rm = TRUE)) %>% 
     filter(!is.na(avg_ss))
   
-  p <- ggplot(fwd_summary, aes(avg_ss, coverage)) + 
+   rev_summary <- bed_map(rev_zscores, 
+                         rev_scores,
+                         avg_ss = mean(structure_score, 
+                                       na.rm = TRUE)) %>% 
+    filter(!is.na(avg_ss))
+   
+   cov_summaries <- bind_rows(fwd_summary,
+                              rev_summary)
+  
+  p <- ggplot(cov_summaries, aes(avg_ss, coverage)) + 
     geom_point() +
     geom_density_2d() 
   p

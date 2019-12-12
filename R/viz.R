@@ -14,7 +14,8 @@ plot_secondary_structure <- function(seq,
                                      varna_jar = NULL,
                                      bin = TRUE,
                                      windsorize = TRUE,
-                                     max_quantile = 0.97){
+                                     max_quantile = 0.97,
+                                     max_reactivity = NULL){
   
   if( is.null(varna_jar) && Sys.getenv("VARNA") == "") {
     stop("could not find VARNA environment variable
@@ -62,7 +63,11 @@ plot_secondary_structure <- function(seq,
     
     if(length(reactive_values) > 0) {
       if(windsorize){
-        max_value <- quantile(reactive_values, max_quantile)
+        if(is.null(max_reactivity)){
+          max_value <- quantile(reactive_values, max_quantile)
+        } else {
+          max_value <- max_reactivity
+        }
         reactive_values[reactive_values > max_value] <- max_value
       }
       
