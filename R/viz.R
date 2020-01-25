@@ -15,7 +15,10 @@ plot_secondary_structure <- function(seq,
                                      bin = TRUE,
                                      windsorize = TRUE,
                                      max_quantile = 0.97,
-                                     max_reactivity = NULL){
+                                     max_reactivity = NULL,
+                                     legend = TRUE,
+                                     overlay_args = list(img_pos = c(0.75,
+                                                                     0.75))){
   
   if( is.null(varna_jar) && Sys.getenv("VARNA") == "") {
     stop("could not find VARNA environment variable
@@ -97,7 +100,7 @@ plot_secondary_structure <- function(seq,
                                                collapse = ","), 
                                         "'")                       
                                })
-    
+
     varna_args <- c(varna_args, style_args, base_style_args)
     
   } else if (!is.null(color_by)) {
@@ -115,9 +118,9 @@ plot_secondary_structure <- function(seq,
     color_by[color_by == "-999"] <- "0"
     color_str <- paste0(color_by, collapse = ";")
     color_max <- max(as.numeric(color_by))
-    
-    col_breaks <- c(0, 0.05, 0.1, 0.2, 0.3, 0.5, 0.6, 0.8, 1) / color_max
-    col_map_str <- paste0(col_breaks, ":",col_map, collapse = ";")
+    color_min <- min(as.numeric(color_by))
+    col_breaks <- c(0, 0.05, 0.1, 0.2, 0.3, 0.5, 0.6, 0.8, 1) * color_max
+    col_map_str <- paste0(col_breaks[-1], ":",col_map[-1], collapse = ";")
     
     colormap_args <- c(
       "-colorMap", shQuote(color_str),
@@ -133,10 +136,74 @@ plot_secondary_structure <- function(seq,
           varna_args,
           wait = TRUE)
   
+  if(legend && bin){
+     f <- tempfile(fileext = ".png")
+     on.exit(unlink(f))
+    #f <- "tmp.png"
+    col_breaks <- col_breaks[col_breaks != -999] 
+    col_map <- col_map[col_breaks != -999]
+    plot_legend(col_breaks, col_map, fn = f)
+
+    do.call(overlay_images,
+            c(png1 = outpath, 
+              png2 = f,
+              out = outpath,
+              overlay_args))
+  }
+  
 }
 
+#' Uses imageMagick to overlay two pngs 
+#' Used for adding a legend to a secondary structure
+overlay_images <- function(png1, 
+                           png2,
+                           out = "out.png",
+                           img_pos = c(0.5, 0.9)){
+  convert_cmd <- Sys.which("convert")
+  img_size <- dim(readPNG(png1))
+  
+  h <- img_size[1]
+  w <- img_size[2]
+  c_args <- c(
+    "-size",
+    paste0(w,"x",h),
+    "-composite",
+    png1,
+    png2,
+    "-geometry",
+    paste0(w * 0.5,
+           "x",
+           h * 0.5,
+           "+",
+           w * img_pos[1],
+           "+",
+           h * img_pos[2]),
+    "-depth",
+    "8",
+    out
+  )
+  
+  system2(convert_cmd,
+          c_args)
+}
 
+#' Generates a legend with continous color map
+#' ands saves as png
+plot_legend <- function(values, 
+                        legend_colors, 
+                        fn = "legend.png",
+                        ...){
+  df <- tibble(x = values, y = values)
+  
+  p <- ggplot(df, aes(x, y)) +
+    geom_point(aes(color = y)) +
+    scale_color_gradientn(name = "",
+                          colors = legend_colors)
 
+  p <- ggpubr::get_legend(p) %>% as_ggplot()
+  
+  save_plot(fn, p, base_asp = 1, ...)
+}
 
 comp_ss <- function(x, y){
   if(!y %in% c("(", ")")){
@@ -147,6 +214,7 @@ comp_ss <- function(x, y){
     return(0L)
   }
 }
+
 vcomp_ss <- Vectorize(comp_ss)
 
 calc_ss_similarity <- function(pred, ref, sequence, count_only_ac = TRUE){

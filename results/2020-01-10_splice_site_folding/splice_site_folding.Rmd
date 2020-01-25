@@ -1,0 +1,637 @@
+---
+title: "Splice site folding analysis"
+author: "Kent Riemondy RBI"
+date: "1/10/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(txcompare)
+library(valr)
+source(here::here("R/constants.R"))
+```
+
+## Splice sites
+
+
+```{r}
+ssites <- read_tsv(file.path(data_dir, "processed",
+                   "C4_structure_peaks_introns_better_splicing.txt"))
+
+colnames(ssites) <- c(
+  "chrom",
+  "start",
+  "end",
+  "name",
+  "Wt_SE",
+  "Slow_SE",
+  "strand",
+  "peak_chrom",
+  "peak_start",
+  "peak_end"
+)
+
+mutate_if(ssites, is.numeric, as.character) %>% 
+  write_tsv(., "C4_introns.bed", col_names = FALSE)
+# add id for each intron to use for splitting
+
+ssites %>% 
+  select(starts_with("peak"), strand) %>% 
+  mutate_if(is.numeric, as.character) %>% 
+  write_tsv(., "C4_intron_structures.bed", col_names = FALSE)
+
+ssites <- mutate(ssites, 
+                 iid = str_c(chrom, start, end, name, sep = "::"),
+                 pid = str_c(peak_chrom, peak_start, peak_end, name, sep = "::"))
+
+
+ssite_lst <- split(ssites, ssites$iid)
+
+# drop intron coordinates, in the name already, and duplicate the coordinates
+ssite_lst <- map(ssite_lst, 
+                 ~mutate(.x, 
+                        chrom = peak_chrom,
+                        start = peak_start,
+                        end = peak_end,
+                        strand) %>% 
+                   select(chrom:strand, peak_chrom:pid))
+```
+
+Add slop to the peak sequences
+
+```{r}
+n_slop <- 10
+
+gnome <- read_tsv(annots$fa_idx, 
+                  col_names = c("chrom", "size"),
+                  col_types = c("cd---"))
+
+ssite_lst <- map(ssite_lst, ~bed_slop(.x,
+                                      genome = gnome,
+                                      both = n_slop))
+
+ssite_lst <- map(ssite_lst, 
+                 ~get_sequences(.x, fasta = annots$fa))
+
+## add shuffled sequences
+ssite_lst <- map(ssite_lst, 
+                 ~mutate(.x,
+                         shuffled_seq = shuffle_seqs(seq)))
+
+## add shuffled peaks within intron and seqs 
+ssite_lst <- imap(ssite_lst, 
+                 function(ivls, intron){
+                   incl_ivl <-  intron %>%
+                     str_split("::") %>% 
+                     map_df(~tibble(chrom = .x[1], 
+                                    start = as.numeric(.x[2]),
+                                    end = as.numeric(.x[3])))
+                   
+                   shuffled_ivls <- select(ivls, 
+                                          chrom = peak_chrom,
+                                          start = peak_start,
+                                          end = peak_end, 
+                                          strand = strand) %>% 
+                     bed_shuffle(., genome= gnome, incl = incl_ivl) %>% 
+                     mutate(strand = unique(ivls$strand)) %>% 
+                     get_sequences(fasta_path = annots$fa) %>% 
+                     select(shuffled_start = start, 
+                            shuffled_end = end,
+                            shuffled_peak_seq = seq) %>% 
+                     bind_cols(ivls, .)
+                   shuffled_ivls
+                 })
+
+```
+
+```{r}
+count_basepairs <- function(seq){
+  bp_strs <- c("(", ")")
+  bp <- sum(str_count(seq, fixed(bp_strs)))
+  unpaired <- str_count(seq, fixed("."))
+  
+  tibble(paired = bp,
+         unpaired = unpaired,
+         proportion_bp = bp / sum(bp, unpaired))
+}
+
+fold_local_structures <- function(df, col = "seq", nslop = n_slop){
+  folding_res <- map(df[[col]], 
+                     ~run_rnastructure(.x, "-k", "--MFE"))
+  bp_summary <- map_dfr(folding_res,
+                        function(x){
+                          seq_in_peak <- str_sub(x[[3]], 
+                                                 nslop + 1, 
+                                                 -(nslop - 1))
+                          count_basepairs(seq_in_peak)
+                        })
+  # bp_summary <- mutate(bp_summary, 
+  #                      delG = map_dbl(folding_res,
+  #                                 ~str_match(.x[1], "= (-\\d+(\\.\\d+|\\d+))") %>% 
+  #                                   .[, 2] %>% 
+  #                                   as.numeric()))
+  bp_summary <- mutate(bp_summary, 
+                       delG = map_dbl(folding_res,
+                                  ~str_split(.x[1], 
+                                             " ", 
+                                             simplify = TRUE) %>% 
+                                    .[3] %>% 
+                                    as.numeric()))
+  bp_summary
+}
+
+# need to run in parallel
+# res_local <- map_dfr(ssite_lst[1:50], 
+#         ~fold_local_structures(.x, "seq"), .id = "splice_site")
+# # 
+# res_shuffled <- map_dfr(ssite_lst[1:10], 
+#          ~fold_local_structures(.x, "shuffled_seq"), .id = "splice_site")
+# 
+# res_shuffled_peaks <- map_dfr(ssite_lst[1:10], 
+#          ~fold_local_structures(.x, "shuffled_peak_seq"), .id = "splice_site")
+
+library(doParallel)
+ncores <- 7
+
+cis_res <- map_dfr(structure(c("seq", "shuffled_peak_seq"),
+                         names = c("local_seq", "shuffled_peak_seq")),
+    function(seq_type){
+      cl <- makeCluster(ncores)
+      registerDoParallel(cl)
+      out <- foreach(i=ssite_lst, 
+                     .packages = c("purrr", 
+                                   "stringr",
+                                   "tibble",
+                                   "dplyr"),
+                     .export = c("run_rnastructure",
+                                 "fold_local_structures",
+                                 "count_basepairs",
+                                 "n_slop")) %dopar% {
+                                   
+        a <- fold_local_structures(i, seq_type)
+        bind_rows(a, .id = "splice_site")
+        
+                                 }
+      stopCluster(cl)
+      out <- bind_rows(out)
+    
+    },
+    .id = "seq_type")
+
+
+cis_res <- map_dfr(structure(c("seq", "shuffled_peak_seq"),
+                         names = c("local_seq", "shuffled_peak_seq")),
+    function(seq_type){
+      map_dfr(ssite_lst, 
+         ~fold_local_structures(.x, seq_type), .id = "splice_site"
+         )},
+    .id = "seq_type")
+```
+
+```{r}
+
+plt_dat <- cis_res %>% 
+  mutate(proportion_bp = ifelse(is.na(proportion_bp), 0, proportion_bp),
+         delG = ifelse(is.na(delG), 0, delG))
+
+p_del_g <- ggplot(plt_dat, aes(seq_type, delG)) +
+  geom_jitter() + 
+  geom_boxplot(aes(fill =seq_type), alpha = 0.66, coef = Inf)  +
+  scale_fill_brewer(palette = "Set1") +
+  theme(legend.position = "none") +
+    labs(x = "",
+       y = "Delta G")
+
+p_prop_bp <- ggplot(plt_dat, aes(seq_type, proportion_bp)) +
+  geom_jitter() + 
+  geom_boxplot(aes(fill =seq_type), alpha = 0.66, coef = Inf)  +
+  scale_fill_brewer(palette = "Set1") +
+  theme(legend.position = "none") +
+  labs(x = "",
+       y = "Proportion basepaired")
+
+p <- plot_grid(p_del_g, p_prop_bp, nrow = 1, ncol = 2)
+p
+save_plot("local_folding.pdf", p, nrow = 1, ncol = 2, base_asp = 1)
+```
+
+Subset to just the 3' SS proximal peak
+
+```{r}
+# drop introns with only 1 structure peak (could be negative controls i suppose)
+ssite_lst <- ssite_lst[map_lgl(ssite_lst, ~nrow(.x) > 1)]
+
+introns <- names(ssite_lst)
+
+names(introns) <- names(ssite_lst)
+
+# trans_res <- map_dfr(introns, function(intron) {
+#   tmp <- ssite_lst[[intron]]
+#   tmp_split <- split(tmp, tmp$pid)
+#   
+#   comps <- combn(tmp$pid, 2, list)
+#   res <- map_dfr(comps, function(x){
+#     
+#     pid1 <- x[[1]]
+#     pid2 <- x[[2]]
+#     
+#     fres <- run_duplex_fold(tmp_split[[pid1]]$seq,
+#                     tmp_split[[pid2]]$seq,
+#                     return_dot = F)
+#     a <- fres$df  
+#     break_pos <- which(a$nucleotide == "I")
+#     break_start <- break_pos[1]
+#     break_end <- break_pos[length(break_pos)]
+#     
+#     p1_start <- n_slop
+#     p1_end <- break_start - n_slop
+#     p2_start <- break_end + n_slop
+#     p2_end <- nrow(a) - n_slop
+#     
+#     n_paired <- filter(a, index > p1_start, index <= p1_end, 
+#                        bp_nt > p2_start, bp_nt <= p2_end) %>% 
+#       nrow()
+#     
+#     p1_len <- p1_end - p1_start - 1
+#     tibble(
+#       peak1 = x[1],
+#       peak2 = x[2],
+#       paired = n_paired, 
+#       unpaired = p1_len - paired,
+#       proportion_bp = paired / p1_len,
+#       delG = fres$delg)
+#     
+#   })
+# }, .id = "intron")
+
+
+cl <- makeCluster(ncores)
+registerDoParallel(cl)
+trans_res_lst <- foreach(i = introns,  
+                     .packages = c("purrr", 
+                                   "stringr",
+                                   "tibble",
+                                   "dplyr",
+                                   "readr"),
+                     .export = c("run_rnastructure",
+                                 "fold_local_structures",
+                                 "count_basepairs",
+                                 "n_slop",
+                                 "run_duplex_fold",
+                                 "ssite_lst")) %dopar% {
+  tmp <- ssite_lst[[i]]
+  tmp_split <- split(tmp, tmp$pid)
+  
+  comps <- combn(tmp$pid, 2, list)
+  res <- map_dfr(comps, function(x){
+    
+    pid1 <- x[[1]]
+    pid2 <- x[[2]]
+    
+    fres <- run_duplex_fold(tmp_split[[pid1]]$seq,
+                    tmp_split[[pid2]]$seq,
+                    return_dot = F)
+    a <- fres$df  
+    break_pos <- which(a$nucleotide == "I")
+    break_start <- break_pos[1]
+    break_end <- break_pos[length(break_pos)]
+    
+    p1_start <- n_slop
+    p1_end <- break_start - n_slop
+    p2_start <- break_end + n_slop
+    p2_end <- nrow(a) - n_slop
+    
+    n_paired <- filter(a, index > p1_start, index <= p1_end, 
+                       bp_nt > p2_start, bp_nt <= p2_end) %>% 
+      nrow()
+    
+    p1_len <- p1_end - p1_start - 1
+    tibble(
+      peak1 = x[1],
+      peak2 = x[2],
+      paired = n_paired, 
+      unpaired = p1_len - paired,
+      proportion_bp = paired / p1_len,
+      delG = fres$delg)
+    
+  })
+}
+
+stopCluster(cl)
+
+names(trans_res_lst) <- introns
+trans_res <- bind_rows(trans_res_lst, .id = "intron")
+```
+bifold
+```{r}
+cl <- makeCluster(ncores)
+registerDoParallel(cl)
+
+trans_res_lst_bifold <- foreach(i = introns,  
+                     .packages = c("purrr", 
+                                   "stringr",
+                                   "tibble",
+                                   "dplyr",
+                                   "readr"),
+                     .export = c("run_rnastructure",
+                                 "fold_local_structures",
+                                 "count_basepairs",
+                                 "n_slop",
+                                 "run_duplex_fold",
+                                 "ssite_lst")) %dopar% {
+                                   message(i)
+  tmp <- ssite_lst[[i]]
+  tmp_split <- split(tmp, tmp$pid)
+  
+  comps <- combn(tmp$pid, 2, list)
+  res <- map_dfr(comps, function(x){
+    
+    pid1 <- x[[1]]
+    pid2 <- x[[2]]
+    
+    fres <- run_bifold(tmp_split[[pid1]]$seq,
+                    tmp_split[[pid2]]$seq,
+                    return_dot = F)
+    if(nrow(fres$df) == 0){
+      out <- tibble(
+        peak1 = pid1,
+        peak2 = pid2,
+        paired = NA, 
+        unpaired = NA,
+        proportion_bp = NA,
+        delG = NA)
+      return(out)
+    }
+    a <- fres$df  
+    break_pos <- which(a$nucleotide == "I")
+    break_start <- break_pos[1]
+    break_end <- break_pos[length(break_pos)]
+    
+    p1_start <- n_slop
+    p1_end <- break_start - n_slop
+    p2_start <- break_end + n_slop
+    p2_end <- nrow(a) - n_slop
+    
+    n_paired <- filter(a, index > p1_start, index <= p1_end, 
+                       bp_nt > p2_start, bp_nt <= p2_end) %>% 
+      nrow()
+    
+    p1_len <- p1_end - p1_start - 1
+    tibble(
+      peak1 = x[1],
+      peak2 = x[2],
+      paired = n_paired, 
+      unpaired = p1_len - paired,
+      proportion_bp = paired / p1_len,
+      delG = fres$delg)
+    
+  })
+}
+
+stopCluster(cl)
+
+names(trans_res_lst_bifold) <- introns
+trans_res_bifold <- bind_rows(trans_res_lst_bifold, .id = "intron")
+
+```
+
+```{r}
+strand_info <- ssite_lst %>% 
+  bind_rows() %>% 
+  group_by(iid) %>% 
+  arrange(peak_chrom, peak_start, peak_end, .by_group = TRUE) %>% 
+   mutate(ssite_proximal = ifelse(strand == "+",
+                                 dplyr::last(pid),
+                                 dplyr::first(pid))) %>% 
+  select(iid, strand, ssite_proximal)  %>% 
+  unique()
+
+plt_dat <- trans_res %>%
+  left_join(strand_info, by = c("intron" = "iid")) %>% 
+  mutate(seq_type = "distal_duplex",
+         p3_ss = peak1 == ssite_proximal | peak2 == ssite_proximal) %>% 
+  # separate(intron, c("chrom", "start", "end", "iid"), sep = "::") %>% 
+  # separate(peak1, c("peak_chrom_1", "peak_start_1", 
+  #                   "peak_end_1", "peak_iid_1"), sep = "::") %>% 
+  # separate(peak2, c("peak_chrom_2", "peak_start_2", 
+  #                   "peak_end_2", "peak_iid_2"), sep = "::") %>% 
+  # group_by(iid) %>% 
+  # arrange(peak_chrom_1, peak_start_1, peak_end_1, .by_group = TRUE) %>% 
+  # mutate(ssite_proximal = ifelse(strand == "+",
+  #                                first(intron),
+  #                                last(intron)))
+
+  mutate(proportion_bp = ifelse(is.na(proportion_bp), 0, proportion_bp),
+         delG = ifelse(is.na(delG), 0, delG)) %>% 
+  select(seq_type, proportion_bp, delG)
+
+plt_dat_bifold <- trans_res_bifold %>%
+  left_join(strand_info, by = c("intron" = "iid")) %>% 
+  mutate(seq_type = "distal_bifold",
+         p3_ss = peak1 == ssite_proximal | peak2 == ssite_proximal) %>% 
+  # separate(intron, c("chrom", "start", "end", "iid"), sep = "::") %>% 
+  # separate(peak1, c("peak_chrom_1", "peak_start_1", 
+  #                   "peak_end_1", "peak_iid_1"), sep = "::") %>% 
+  # separate(peak2, c("peak_chrom_2", "peak_start_2", 
+  #                   "peak_end_2", "peak_iid_2"), sep = "::") %>% 
+  # group_by(iid) %>% 
+  # arrange(peak_chrom_1, peak_start_1, peak_end_1, .by_group = TRUE) %>% 
+  # mutate(ssite_proximal = ifelse(strand == "+",
+  #                                first(intron),
+  #                                last(intron)))
+
+  mutate(proportion_bp = ifelse(is.na(proportion_bp), 0, proportion_bp),
+         delG = ifelse(is.na(delG), 0, delG)) %>% 
+  select(seq_type, proportion_bp, delG)
+
+
+plt_dat_cis <- cis_res %>% 
+  mutate(proportion_bp = ifelse(is.na(proportion_bp), 0, proportion_bp),
+         delG = ifelse(is.na(delG), 0, delG)) %>% 
+  select(seq_type, proportion_bp, delG)
+
+plt_dat <- bind_rows(plt_dat, plt_dat_bifold,  plt_dat_cis)
+
+p_del_g <- ggplot(plt_dat, aes(seq_type, delG)) +
+  geom_jitter() + 
+  geom_boxplot(aes(fill =seq_type), alpha = 0.66, coef = Inf)  +
+  scale_fill_brewer(palette = "Set1") +
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+    labs(x = "",
+       y = "Delta G")
+
+p_prop_bp <- ggplot(plt_dat, aes(seq_type, proportion_bp)) +
+  geom_jitter() + 
+  geom_boxplot(aes(fill =seq_type), alpha = 0.66, coef = Inf)  +
+  scale_fill_brewer(palette = "Set1") +
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+  labs(x = "",
+       y = "Proportion basepaired")
+
+p <- plot_grid(p_del_g, p_prop_bp, nrow = 1, ncol = 2)
+p
+save_plot("local_distal_folding.pdf", p, nrow = 1, ncol = 2, base_asp = 1)
+```
+
+Show all delta Gs, then delta G's for 3' SS peak to upstream peak.
+
+
+```{r}
+strand_info <- ssite_lst %>% 
+  bind_rows() %>% 
+  group_by(iid) %>% 
+  arrange(peak_chrom, peak_start, peak_end, .by_group = TRUE) %>% 
+   mutate(ssite_proximal = ifelse(strand == "+",
+                                 dplyr::last(pid),
+                                 dplyr::first(pid))) %>% 
+  select(iid, strand, ssite_proximal)  %>% 
+  unique()
+
+plt_dat <- trans_res %>%
+  left_join(strand_info, by = c("intron" = "iid")) %>% 
+  mutate(seq_type = "distal_duplex",
+         p3_ss = peak1 == ssite_proximal | peak2 == ssite_proximal) %>% 
+  filter(p3_ss) %>% 
+  mutate(proportion_bp = ifelse(is.na(proportion_bp), 0, proportion_bp),
+         delG = ifelse(is.na(delG), 0, delG)) %>% 
+  select(seq_type, proportion_bp, delG)
+
+plt_dat_bifold <- trans_res_bifold %>%
+  left_join(strand_info, by = c("intron" = "iid")) %>% 
+  mutate(seq_type = "distal_bifold",
+         p3_ss = peak1 == ssite_proximal | peak2 == ssite_proximal) %>% 
+  filter(p3_ss) %>% 
+  mutate(proportion_bp = ifelse(is.na(proportion_bp), 0, proportion_bp),
+         delG = ifelse(is.na(delG), 0, delG)) %>% 
+  select(seq_type, proportion_bp, delG)
+
+
+plt_dat_cis <- cis_res %>% 
+  mutate(proportion_bp = ifelse(is.na(proportion_bp), 0, proportion_bp),
+         delG = ifelse(is.na(delG), 0, delG)) %>% 
+  select(seq_type, proportion_bp, delG)
+
+plt_dat <- bind_rows(plt_dat, plt_dat_bifold,  plt_dat_cis)
+
+p_del_g <- ggplot(plt_dat, aes(seq_type, delG)) +
+  geom_jitter() + 
+  geom_boxplot(aes(fill =seq_type), alpha = 0.66, coef = Inf)  +
+  scale_fill_brewer(palette = "Set1") +
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+    labs(x = "",
+       y = "Delta G")
+
+p_prop_bp <- ggplot(plt_dat, aes(seq_type, proportion_bp)) +
+  geom_jitter() + 
+  geom_boxplot(aes(fill =seq_type), alpha = 0.66, coef = Inf)  +
+  scale_fill_brewer(palette = "Set1") +
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+  labs(x = "",
+       y = "Proportion basepaired")
+
+p <- plot_grid(p_del_g, p_prop_bp, nrow = 1, ncol = 2)
+p
+save_plot("local_distal_only_3p_folding.pdf", p, nrow = 1, ncol = 2, base_asp = 1)
+```
+
+
+Only adjacent interactions
+
+```{r}
+strand_info <- ssite_lst %>% 
+  bind_rows() %>% 
+  group_by(iid) %>% 
+  arrange(peak_chrom, peak_start, peak_end, .by_group = TRUE) %>% 
+   mutate(ssite_proximal = ifelse(strand == "+",
+                                 dplyr::last(pid),
+                                 dplyr::first(pid))) %>% 
+  select(iid, strand, ssite_proximal)  %>% 
+  unique()
+
+plt_dat <- trans_res %>%
+  left_join(strand_info, by = c("intron" = "iid")) %>% 
+  mutate(seq_type = "distal_duplex",
+         p3_ss = peak1 == ssite_proximal | peak2 == ssite_proximal) %>% 
+  filter(p3_ss) %>% 
+  mutate(peak_1_new = ifelse(peak1 == ssite_proximal,
+                             peak1,
+                             peak2),
+         peak_2_new = ifelse(peak1 == ssite_proximal,
+                             peak2,
+                             peak1)) %>% 
+  separate(peak_2_new, c("peak_chrom_2", "peak_start_2", 
+                     "peak_end_2", "peak_iid_2"), sep = "::",
+           remove = FALSE) %>% 
+  group_by(intron) %>% 
+  arrange(peak_chrom_2, peak_start_2, peak_end_2, .by_group = TRUE) %>% 
+  mutate(ssite_proximal_to_3ssp = ifelse(strand == "+",
+                                  dplyr::last(peak_2_new),
+                                  dplyr::first(peak_2_new))) %>% 
+  filter(peak_2_new == ssite_proximal_to_3ssp) %>% 
+  mutate(proportion_bp = ifelse(is.na(proportion_bp), 0, proportion_bp),
+         delG = ifelse(is.na(delG), 0, delG)) %>% 
+  select(seq_type, proportion_bp, delG)
+
+plt_dat_bifold <- trans_res_bifold %>%
+  left_join(strand_info, by = c("intron" = "iid")) %>% 
+  mutate(seq_type = "distal_bifold",
+         p3_ss = peak1 == ssite_proximal | peak2 == ssite_proximal) %>% 
+  filter(p3_ss) %>% 
+ mutate(peak_1_new = ifelse(peak1 == ssite_proximal,
+                             peak1,
+                             peak2),
+         peak_2_new = ifelse(peak1 == ssite_proximal,
+                             peak2,
+                             peak1)) %>% 
+  separate(peak_2_new, c("peak_chrom_2", "peak_start_2", 
+                     "peak_end_2", "peak_iid_2"), sep = "::",
+           remove = FALSE) %>% 
+  group_by(intron) %>% 
+  arrange(peak_chrom_2, peak_start_2, peak_end_2, .by_group = TRUE) %>% 
+  mutate(ssite_proximal_to_3ssp = ifelse(strand == "+",
+                                  dplyr::last(peak_2_new),
+                                  dplyr::first(peak_2_new))) %>% 
+  filter(peak_2_new == ssite_proximal_to_3ssp) %>% 
+  mutate(proportion_bp = ifelse(is.na(proportion_bp), 0, proportion_bp),
+         delG = ifelse(is.na(delG), 0, delG)) %>% 
+  select(seq_type, proportion_bp, delG)
+
+
+plt_dat_cis <- cis_res %>% 
+  mutate(proportion_bp = ifelse(is.na(proportion_bp), 0, proportion_bp),
+         delG = ifelse(is.na(delG), 0, delG)) %>% 
+  select(seq_type, proportion_bp, delG)
+
+plt_dat <- bind_rows(plt_dat, plt_dat_bifold,  plt_dat_cis)
+
+p_del_g <- ggplot(plt_dat, aes(seq_type, delG)) +
+  geom_jitter() + 
+  geom_boxplot(aes(fill =seq_type), alpha = 0.66, coef = Inf)  +
+  scale_fill_brewer(palette = "Set1") +
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+    labs(x = "",
+       y = "Delta G")
+
+p_prop_bp <- ggplot(plt_dat, aes(seq_type, proportion_bp)) +
+  geom_jitter() + 
+  geom_boxplot(aes(fill =seq_type), alpha = 0.66, coef = Inf)  +
+  scale_fill_brewer(palette = "Set1") +
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+  labs(x = "",
+       y = "Proportion basepaired")
+
+p <- plot_grid(p_del_g, p_prop_bp, nrow = 1, ncol = 2)
+p
+save_plot("local_distal_only_3p_adjacent_folding.pdf", p, nrow = 1, ncol = 2, base_asp = 1)
+```

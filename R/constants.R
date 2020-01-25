@@ -22,5 +22,19 @@ db_dir <- file.path(project_dir, "dbases")
 
 theme_set(theme_cowplot())
 
-source(file.path(project_dir, "R", "io.R"))
-source(file.path(project_dir, "R", "viz.R"))
+#### annotation files ####
+
+annots <- list(
+  fa = "~/Projects/shared_dbases/genomes/human/chr_appended_grch37/Homo_sapiens.GRCh37.dna.primary_assembly_chrappended.fa",
+  fa_idx = "~/Projects/shared_dbases/genomes/human/chr_appended_grch37/Homo_sapiens.GRCh37.dna.primary_assembly_chrappended.fa.fai"
+)
+
+#### Other R scripts ####
+source_files <- dir(file.path(project_dir, "R"), 
+                    pattern = ".R$",
+                    full.names = TRUE)
+
+source_files <- setdiff(source_files, 
+                        file.path(project_dir, "R", "constants.R"))
+
+walk(source_files, source)
