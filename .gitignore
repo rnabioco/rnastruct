@@ -21,3 +21,5 @@ dbases/
 *.jpeg
 *.map
 *.xml
+*.fa
+*.shape

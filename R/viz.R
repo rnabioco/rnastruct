@@ -136,7 +136,7 @@ plot_secondary_structure <- function(seq,
           varna_args,
           wait = TRUE)
   
-  if(legend && bin){
+  if(legend && bin && !is.null(color_by)){
      f <- tempfile(fileext = ".png")
      on.exit(unlink(f))
     #f <- "tmp.png"
@@ -160,7 +160,7 @@ overlay_images <- function(png1,
                            out = "out.png",
                            img_pos = c(0.5, 0.9)){
   convert_cmd <- Sys.which("convert")
-  img_size <- dim(readPNG(png1))
+  img_size <- dim(png::readPNG(png1))
   
   h <- img_size[1]
   w <- img_size[2]
@@ -200,7 +200,7 @@ plot_legend <- function(values,
     scale_color_gradientn(name = "",
                           colors = legend_colors)
 
-  p <- ggpubr::get_legend(p) %>% as_ggplot()
+  p <- ggpubr::get_legend(p) %>% ggpubr::as_ggplot()
   
   save_plot(fn, p, base_asp = 1, ...)
 }
