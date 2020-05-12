@@ -1,0 +1,12 @@
+# see https://pysam.readthedocs.io/en/latest/api.html?highlight=bam_funmap#pysam.AlignmentFile.pileup
+# for argument documention
+# only args shown here are supported
+max_depth: 100000
+ignore_overlaps: False 
+min_base_quality: 0
+min_mapping_quality: 0
+compute_baq: False
+ignore_orphans: False
+redo_baq: False
+adjust_capq_threshold: 0
+stepper: 'nofilter'
