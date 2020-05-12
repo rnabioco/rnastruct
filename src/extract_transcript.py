@@ -92,6 +92,36 @@ class Structpileup:
     def __str__(self):
         return "\t".join([str(x) for x in vars(self).values()])
 
+def get_global_norm(gene_fn, tbx_fo, m_col, se_col):
+    mutation_rates = []
+    for tx in parse_bed(gene_fn):
+        
+        has_strand = False
+        if len(tx) >= 6:
+            if tx[5] in ["+", "-"]:
+                has_strand = True
+            else:
+                print("unrecognized character in column 6, expecting + or - \n ignoring strand", file = sys.stderr)
+        
+        for row in tbx_fo.fetch(tx[0], tx[1], tx[2]):
+            
+            vals = Structinfo(row, m_col, se_col)
+
+            if has_strand and vals.strand != tx[5]:
+              continue
+          
+            # ignore - pileup features if no strandedness requested from
+            # interval
+            if not has_strand and vals.strand == "-":
+              continue
+
+            mutation_rates.append(vals.mm)
+    mutation_rates = np.array(mutation_rates)
+    norm_factor = norm_methods.calc_global_norm(mutation_rates)
+    
+    gene_fn.seek(0)
+    return norm_factor
+
 def main():
     
     parser = argparse.ArgumentParser(description="""
@@ -154,11 +184,20 @@ def main():
                         or boxplot norm for shape and map.
                         \n"""),
                         action = "store_true")
+
+    parser.add_argument('-gn',
+                        '--global_norm',
+                        help = textwrap.dedent("""\
+                        Estimate normalization cutoff using all supplied
+                        bed interval regions (for shape and Map only)
+                        \n"""),
+                        action = "store_true")
     parser.add_argument('-nc',
                         '--norm_cutoff',
                         help = textwrap.dedent("""\
                         Cutoff value to determine paired or unpaired for
-                        constraint.
+                        constraint or normalization threshold for MAP or
+                        shape values
                         \n"""),
                         required = False,
                         type = float)
@@ -186,6 +225,14 @@ def main():
    
     fa_fh = pysam.FastaFile(args.fasta)
     
+    norm_data = args.norm
+    norm_cutoff = args.norm_cutoff
+    outtype = args.outtype
+        
+    if outtype in ["M", "S"]:
+        if norm_data and not norm_cutoff:
+            norm_cutoff = get_global_norm(gene_fn, tbx, m_col, se_col)
+     
     for tx in parse_bed(gene_fn):
         
         d = {}
@@ -239,10 +286,8 @@ def main():
 
         df = pd.DataFrame(res_list)
         
-        norm_rnafold = args.norm
-        norm_cutoff = args.norm_cutoff
 
-        if norm_rnafold:
+        if norm_data and outtype == "C":
             nvals = df.shape[0]
             nas = np.where(df[1] == -999)[0]
             vals = np.where(df[1] != -999)[0]
@@ -265,16 +310,22 @@ def main():
             else:
               df["constraints"] = norm_methods.get_constraints(df["norm_vals"]) 
 
-        if args.outtype == "M":
+        if outtype == "M":
             fout = open(os.path.join(output_dir, tx[3] + "_coverage.map"), 'w')
             for line in res_list:
+                if norm_data:
+                    if line[1] == -999:
+                        pass
+                    else:
+                        line[1] = float(line[1]) / norm_cutoff
+                        line[2] = float(line[2]) / norm_cutoff
                 line = [str(x) for x in line]
                 fout.write("\t".join(line) + "\n")
             fout.close()
-        elif args.outtype == "S" :
+        elif outtype == "S" :
             pass
 
-        elif args.outtype == "C":
+        elif outtype == "C":
           utils.to_fasta(df, 
                 os.path.join(output_dir, tx[3] + ".constraints"),
                 nuc_col_idx = 3,

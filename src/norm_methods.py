@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import numpy as np
 import scipy.stats
+import sys
 
 def combine_std_err(stderr_t, stderr_u):
     return math.sqrt(stderr_t**2 + stderr_u**2)
@@ -29,8 +30,12 @@ def calc_global_norm(x):
             " with ", q, " removed",
             file = sys.stderr)
     else:
-      idx = (x <= np.quantile(x, 0.90)) & ( x > np.quantile(x, 0.80))
-      norm_factor = np.mean(x[idx])
+      idx = (x <= np.quantile(x, 0.90)) 
+      # remove top 10%
+      x = x[idx]
+      # keep next top 10% for normalization
+      new_idx = (x >= np.quantile(x, 0.90))
+      norm_factor = np.mean(x[new_idx])
       print("normalization factor = ", 
             norm_factor,
             " using top 10% removal ",

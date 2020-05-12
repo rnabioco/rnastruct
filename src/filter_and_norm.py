@@ -19,25 +19,36 @@ import norm_methods
 
 def unix_sort2(infile, outfile, threads, memory = "8G", header = True, compress = True,
         uncompress = True, verbose = True):
+  
+    sort_test = subprocess.run(["sort", "--parallel=2"],
+              input = "hello world",
+              encoding = 'ascii')
+    if sort_test.returncode == 0:
+      parallel_args = "--parallel=" + str(threads)
+    else:
+      parallel_args = ""
+      if verbose:
+        print("Parallel sort not available (man sort), using 1 thread",
+               sys.stderr)
     
     outfn = open(outfile, 'w')
     
     if uncompress:
         if header:
             sort_cmd = "(gunzip -c " + infile + " | head -n 1 && gunzip -c " + infile + \
-               " | tail -n+2  | sort -S " + memory + " --parallel=" + str(threads) + " -k1,1 -k2,2n -k3,3 " + \
+               " | tail -n+2  | sort -S " + memory + parallel_args + " -k1,1 -k2,2n -k3,3 " + \
                " - "
         else:
             sort_cmd = "gunzip -c " + infile + \
-               " | sort -S " + memory + " --parallel=" + str(threads) + " -k1,1 -k2,2n -k3,3 " + \
+               " | sort -S " + memory + parallel_args + " -k1,1 -k2,2n -k3,3 " + \
                " - "
     else:
         if header:
             sort_cmd = "(head -n 1 " + infile + " && tail -n +2 " + infile + \
-               " | sort -S " + memory + " --parallel=" + str(threads) + " -k1,1 -k2,2n -k3,3 " + \
+               " | sort -S " + memory + parallel_args + " -k1,1 -k2,2n -k3,3 " + \
                " - "
         else:
-            sort_cmd = "sort -S " + memory + " --parallel=" + str(threads) + "-k1,1 -k2,2n -k3,3 " + infile 
+            sort_cmd = "sort -S " + memory + parallel_args + "-k1,1 -k2,2n -k3,3 " + infile 
 
     if compress and header:
         sort_cmd += " | gzip )"
@@ -186,8 +197,8 @@ def main():
                         required = True)
     
     parser.add_argument('-o',
-                        '--outdir',
-                        help ="""tabix indexed outfile directory
+                        '--outpre',
+                        help ="""tabix indexed outfile prefix
                         \n""",
                         required = True)
 
@@ -254,8 +265,13 @@ def main():
     with gzip.open(args.treated_tabix_file, 'rt') as f:
       hdr = f.readline()
       f.seek(0)
- 
-    tmp_dir = args.outdir
+    
+    outpre = args.outpre
+    outdir = os.path.dirname(outpre)
+    if not os.path.exists(outdir) and outdir:
+       os.makedirs(outdir)
+
+    tmp_dir = os.path.join(outdir, "tmpfiles")
     if not os.path.exists(tmp_dir):
        os.makedirs(tmp_dir)
        if verbose:
@@ -335,8 +351,9 @@ def main():
     df["stderr_norm"] = df["stderr_bg_sub"] / normalization_factor
     df.to_csv(output, index = False, sep = "\t", compression = "gzip")
     
+    print(outdir)
     # sort output
-    sorted_output = os.path.join(tmp_dir, "pileup_table.sorted.tsv.gz")
+    sorted_output = outpre + "pileup_table.tsv.gz"
     unix_sort2(output, sorted_output, memory = memory_chunk, threads = thread_count)
     
     # bgzip output
@@ -357,6 +374,7 @@ def main():
         tmpfiles = contig_files + t_contig_files + ut_contig_files
         for fn in tmpfiles:
             os.unlink(fn)
+        os.rmdir(tmp_dir)
 
 if __name__ == '__main__': main()
 

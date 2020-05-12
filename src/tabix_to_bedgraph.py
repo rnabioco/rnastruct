@@ -102,7 +102,10 @@ def main():
 
     parser.add_argument('-i',
                         '--input_table',
-                        help ="""tabix indexed input
+                        help ="""
+   tabix index pileup table,
+   or "-" to pass on standard in.
+   e.g. tabix pileup_table.tsv.bgz "chr16:10000-20000 | tabix_to_bedgraph.py -i - 
                         \n""",
                         required = True)
     parser.add_argument('-c',
@@ -125,7 +128,7 @@ def main():
     parser.add_argument('-n',
                         '--noheader',
                         help = textwrap.dedent("""\
-                        if set, indicats that input pileup table does not 
+                        if set, indicates that input pileup table does not 
                         have a header
                         \n"""), 
                         required = False, 
@@ -134,9 +137,12 @@ def main():
     args = parser.parse_args()
     
     in_fn = args.input_table
-
+    
     cols = [int(x) - 1 for x in args.cols] 
-    in_fh = gzip.open(in_fn, 'rt')
+    if in_fn == "-":
+        in_fh = sys.stdin
+    else:
+        in_fh = gzip.open(in_fn, 'rt')
     
     convert_tabix_to_bg(in_fh, cols, args.strand, sys.stdout, header = args.noheader)
 

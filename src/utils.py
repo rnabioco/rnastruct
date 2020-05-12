@@ -5,6 +5,22 @@ import gzip
 import binascii
 import os
 import sys
+from yaml import load
+
+def get_pileup_args(fn = None):
+  
+  if fn is not None:
+    config_fn = fn
+  else:
+    config_fn = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         "pileup.yaml")
+  with open(config_fn) as f:
+      config_data = f.read()
+  pileup_args = load(config_data)
+  
+  return pileup_args
+  
+pileup_args = get_pileup_args()
 
 def cleanup(tmp_dir, delete = True):
     

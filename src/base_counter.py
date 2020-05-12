@@ -81,18 +81,44 @@ def generate_pileup(bam, fasta, min_depth, deletion_length,
     
     output = outpre + "pileup_table.tsv.gz"
     
+    output_tmpbam = outpre + "filteredbam.bam"
 
-    pileup_cmd =  "samtools view -h " + samflag + " " + bam + " " + region + \
+   # pileup_cmd =  "samtools view -h " + samflag + " " + bam + " " + region + \
+   #               " | filterBam -d " + str(deletion_length) + \
+   #               " | bcftools " + \
+   #               "mpileup " + \
+   #               "-f " + fasta + " " + \
+   #               additional_args + \
+   #               " - " + \
+   #               " | " + \
+   #               "pileup_to_counts.py -v -  -d " + \
+   #               str(min_depth) + rev_flag + " -o " + output
+    
+    bamfilter_cmd = "samtools view -h " + samflag + " " + bam + " " + region + \
                   " | filterBam -d " + str(deletion_length) + \
-                  " | bcftools " + \
+                  " | samtools view -b " + \
+                  " > " + output_tmpbam + " ; " + \
+                  " samtools index " + output_tmpbam
+
+    filter_run = subprocess.run(bamfilter_cmd, 
+            shell=True, 
+            stderr = sys.stderr, 
+            stdout = sys.stdout)
+
+    if verbose:
+        print("bamfilter command is:\n" + filter_run.args, 
+                file = sys.stderr)
+
+    pileup_cmd =  "bcftools " + \
                   "mpileup " + \
                   "-f " + fasta + " " + \
                   additional_args + \
-                  " - " + \
+                  " " + output_tmpbam + " " \
                   " | " + \
                   "pileup_to_counts.py -v -  -d " + \
-                  str(min_depth) + rev_flag + " -o " + output
-                 
+                  str(min_depth) + rev_flag + " -o " + output + \
+                  " -b " + output_tmpbam
+    
     pileup_run = subprocess.run(pileup_cmd, 
             shell=True, 
             stderr = sys.stderr, 
@@ -823,16 +849,17 @@ def main():
                         The following arguments are set by default
                         --ff UNMAP,SECONDARY,QCFAIL,DUP (filter alignments)
                         -B (disable BAQ calculation)
-                        -d 1000000 (use up to 1e6 reads per base)
+                        -d 100000 (use up to 1e5 reads per base)
                         -I dont call indels
                         -A count orphan reads (paired end)
+                        -Q 0
                         -x disable read-pair overlap detection
                         -a AD
                         pass a string to replace these args
                         (default: %(default)s)\n"""
                         ),
                         required = False,
-                        default = " --ff UNMAP,SECONDARY,QCFAIL,DUP -a AD -A -x -d 10000 -L 10000 -B -O v ")
+                        default = " --ff UNMAP,SECONDARY,QCFAIL,DUP -Q 0 -a AD -A -x -d 100000 -L 100000 -B -O v ")
     
     args = parser.parse_args()
     
