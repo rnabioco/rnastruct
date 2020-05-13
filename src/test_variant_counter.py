@@ -6,8 +6,7 @@ import yaml
 from cyvcf2 import VCF
 from yaml import load, dump
 
-class TestVariantCounter:
-    """ testing output file content for now """
+class TestPosStrand:
     bam_fn = "test_data/variant_counter/chr16_fus_dms_delfixed.bam"
     vcf_fn = "test_data/variant_counter/fus.vcf.gz"
     config_fn = "pileup.yaml"

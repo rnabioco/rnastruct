@@ -46,7 +46,6 @@ def pileup_variant_to_vcf(ref, pileup_variants, vcf_variants):
     var_dict = {}
     offset_regex = re.compile('[0-9]+')
     for var in pileup_variants:
-        # ignore line start character
         if var.startswith("^"):
             continue
 
@@ -55,13 +54,13 @@ def pileup_variant_to_vcf(ref, pileup_variants, vcf_variants):
                 offset = int(offset_regex.search(var).group())
             except AttributeError:
                 sys.exit("unable to parse variant " + var)
-            res = ref[:-offset]
+            res = ref[0] + ref[1 + offset:]
         elif "+" in var:
             try:
                 offset = offset_regex.search(var).end()
             except AttributeError:
                 sys.exit("unable to parse variant " + var)
-            res = ref + var[offset:]
+            res = ref[0] + var[offset:] + ref[1:]
         else:
             continue
 
@@ -71,7 +70,6 @@ def pileup_variant_to_vcf(ref, pileup_variants, vcf_variants):
         var_dict[var] = res
     return(var_dict)
 
-# need to ensure that same alignments are used for this step
         
 def count_variants(pileup, variant, warn_allele_mismatch = True):
     """
@@ -103,9 +101,11 @@ def count_variants(pileup, variant, warn_allele_mismatch = True):
             if "-" in val: 
                 frequency[val] += 1
             elif "+" in val:
-                val = val.replace(val[val.index("+") - 1], variant.REF[0])
+                # swap first nucleotide with ref, samtools will report as
+                # snp if not the same
+                val = val.replace(val[val.index("+") - 1], variant.REF[0], 1)
                 frequency[val] += 1
-#        pdb.set_trace() 
+        
         vcf_variant_dict = pileup_variant_to_vcf(variant.REF,
                                                  list(frequency.keys()),
                                                  variant.ALT)

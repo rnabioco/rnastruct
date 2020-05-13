@@ -22,14 +22,15 @@ def unix_sort2(infile, outfile, threads, memory = "8G", header = True, compress 
   
     sort_test = subprocess.run(["sort", "--parallel=2"],
               input = "hello world",
-              encoding = 'ascii')
+              encoding = 'ascii',
+              stderr = subprocess.PIPE)
     if sort_test.returncode == 0:
       parallel_args = "--parallel=" + str(threads)
     else:
       parallel_args = ""
       if verbose:
         print("Parallel sort not available (man sort), using 1 thread",
-               sys.stderr)
+               file = sys.stderr)
     
     outfn = open(outfile, 'w')
     

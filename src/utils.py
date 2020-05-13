@@ -233,14 +233,15 @@ def unix_sort(in_fn, out_fn, threads, memory = "8G", verbose = False):
 
     sort_test = subprocess.run(["sort", "--parallel=2"],
               input = "hello world",
-              encoding = 'ascii')
+              encoding = 'ascii',
+              stderr = subprocess.PIPE)
     if sort_test.returncode == 0:
       parallel_sort_available = True
     else:
       parallel_sort_available = False
       if verbose:
         print("Parallel sort not available (man sort), using 1 thread",
-               sys.stderr)
+               file = sys.stderr)
     
     sort_cmd = ["sort", "-S", memory]
     if parallel_sort_available:

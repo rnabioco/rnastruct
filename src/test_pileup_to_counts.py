@@ -99,7 +99,7 @@ class TestPileuptocounts:
     assert min_depth >= min_depth_arg
   
 
-  def test_indels(self, tmp_path):
+  def test_indels_pos(self, tmp_path):
       vcf = "test_data/pileup_to_counts/fus_dms.vcf"
       bam = "test_data/chr16_fus_dms.bam"
       out =  tmp_path / "fus_counts.tsv.gz"
@@ -111,6 +111,35 @@ class TestPileuptocounts:
             out, 
             min_depth = min_depth_arg, 
             return_comp = False,
+            debug = False)
+      
+      with open(expected_output, 'r') as exp:
+          with gzip.open(out, 'rt') as res:
+            for exp_idx, exp_line in enumerate(exp): 
+              line_found = False
+              for res_idx,res_line in enumerate(res):
+                  if exp_line.split() != res_line.split():
+                      continue
+                  else:
+                      line_found = True
+                      break
+              if not line_found:
+                  msg = "line {}, not found in output\n{}".format(exp_idx,
+                          " ".join(exp_line.split()))
+                  assert False , msg 
+              
+  def test_indels_neg(self, tmp_path):
+      vcf = "test_data/pileup_to_counts/top2a_dms.vcf"
+      bam = "test_data/pileup_to_counts/top2a_dms.bam"
+      out =  tmp_path / "top2a_counts.tsv.gz"
+      min_depth_arg = 10
+      expected_output = "test_data/expected_pileup_to_counts_small.tsv"
+
+      pileup_to_counts.vcf_to_counts(vcf, 
+            bam,
+            out, 
+            min_depth = min_depth_arg, 
+            return_comp = True,
             debug = False)
       
       with open(expected_output, 'r') as exp:

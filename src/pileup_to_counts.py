@@ -1,12 +1,12 @@
 #! /usr/bin/env python3
 import pysam
-from cyvcf2 import VCF
 import numpy as np
 import argparse
 import sys
 import os
-import gzip
 import sys
+import gzip
+from cyvcf2 import VCF
 from collections import Counter
 
 import variant_counter
@@ -41,6 +41,7 @@ def is_snp(v):
         if not v.ALT[i] in ("A", "C", "G", "T", "<*>"):
             return False
         return (len(v.REF) + len(v.ALT)) > 1
+
 def parse_pileup_variant(v):
     """
     return deletion length (or 1 for insertions)
@@ -49,7 +50,7 @@ def parse_pileup_variant(v):
     
     offset_regex = re.compile('[0-9]+')
     if "+" in v:
-        offset = 1 
+        offset = -1 
     elif "-" in v:
         offset = int(offset_regex.search(v).group())
     else:
@@ -64,59 +65,78 @@ class IndelCache():
     indels, there isn't a way to precisley localize, however
     left alignment is used in some publications"""
 
-    def __init__(self, bam, chrom = None):
+    def __init__(self, chrom = None):
         self.d = Counter()
         self.refdepth = Counter()
         self.chrom = chrom
-        self.b = bam
         
     def add(self, ac):
-        # affected nucleotide is first deleted or first insetion pos from
-        # 3' end
+        
         if ac.multiallelic:
             for var, depth in ac.new_alleles.items():
-              if ac.strand == "+":
-                  if var not in ac.v.ALT:
-                      del_length = parse_pileup_variant(var)
-                  else:    
-                  # report left aligned position, offset by length of deletion
-                  # or report insertion at position immediately 5'
-                      del_length = max(len(ac.v.REF) - len(var), 1)
-                  self.d[ac.v.POS + del_length] += depth
-                  for i in range(ac.v.POS + 1, ac.v.POS + del_length):
-                      self.refdepth[i] += depth
-              else:
-                  if var not in ac.v.ALT:
-                      del_length = parse_pileup_variant(var)
-                  # report right aligned position
-                  else:
-                      del_length = max(len(var) - 1, 1)
-                  right_align_pos = ac.v.POS + del_length 
-                  self.d[right_align_pos] += depth
+              
+              if var not in ac.v.ALT:
+                  del_length = parse_pileup_variant(var)
+              else:    
+                  del_length = len(ac.v.REF) - len(var)
 
-                  for i in range(ac.v.POS + 1, right_align_pos): 
-                      self.refdepth[i] += depth
+              if ac.strand == "+":
+                  if del_length < 0:
+                      # insertion
+                      # annotate to position 5' of insertion site
+                      self.d[ac.v.POS] += depth
+                  else:
+                      # deletion
+                      # annotation to 3' most position of deletion
+                      self.d[ac.v.POS + del_length] += depth
+                      # add to coverage
+                      for i in range(ac.v.POS + 1, ac.v.POS + 1 + del_length):
+                          self.refdepth[i] += depth
+              else:
+                  if del_length < 0:
+                      # insertion
+                      # annotate to position 3' of insertion 
+                      self.d[ac.v.POS + 1] += depth
+                  else:
+                      # deletion
+                      # annotate to 5' most position of deletion (5' in
+                      # vcf)
+                      self.d[ac.v.POS + 1] += depth
+                      for i in range(ac.v.POS + 1, ac.v.POS + 1 + del_length): 
+                          self.refdepth[i] += depth
 
         else:
+          
+          del_length = len(ac.v.REF) - len(ac.v.ALT[0])
+          
           if ac.strand == "+":
               # report left aligned position, offset by length of deletion
-              del_length = max(len(ac.v.REF) - len(ac.v.ALT[0]), 1)
-              self.d[ac.v.POS + del_length] += ac.allele_counts["indel"] 
-              for i in range(ac.v.POS + 1, ac.v.POS + del_length):
-                 self.refdepth[i] += ac.allele_counts["indel"] 
+              if del_length < 0:
+                  # insertion
+                  self.d[ac.v.POS] += ac.allele_counts["indel"] 
+              else:
+                  # deletion
+                  self.d[ac.v.POS + del_length] += ac.allele_counts["indel"]
+                  for i in range(ac.v.POS + 1, ac.v.POS + 1 + del_length):
+                      self.refdepth[i] += ac.allele_counts["indel"] 
           else:
-              # report right aligned position
-              right_align_pos = ac.v.POS + max(len(ac.v.ALT[0]) - 1, 1)
-              self.d[right_align_pos] += ac.allele_counts["indel"] 
+              if del_length < 0:
+                  # insertion
+                  # annotate to position 3' of insertion 
+                  self.d[ac.v.POS + 1] += ac.allele_counts["indel"]
+              else:
+                  # deletion
+                  # annotate to 5' most position of deletion (5' in
+                  # vcf)
+                  self.d[ac.v.POS + 1] += ac.allele_counts["indel"]
+                  for i in range(ac.v.POS + 1, ac.v.POS + 1 + del_length): 
+                      self.refdepth[i] += ac.allele_counts["indel"]
               
-              for i in range(ac.v.POS + 1, right_align_pos): 
-                  self.refdepth[i] += ac.allele_counts["indel"]
 
     def n(self):
         return len(self.d), len(self.refdepth)
 
     def get_indel_depth(self, ac):
-        _ = self.get_indel_skipped_coverage(ac)
         return self.d.pop(ac.v.POS, 0)
     
     def get_indel_skipped_coverage(self, ac):
@@ -153,12 +173,17 @@ class AlleleCounter():
     def __str__(self):
         return "\t".join([str(x) for x in self.to_counts()]) + "\n"
     
+    def depth(self):
+        # return counts excluding indel values but including indel coverage
+        # values
+        return sum(self.allele_counts.values()) - self.allele_counts["indel"]
+
     def to_counts(self):
-        depth = sum(self.allele_counts.values()) 
+        depth = self.depth() 
         indel_counts = self.allele_counts["indel"]
         ref_counts = self.allele_counts[self.v.REF]
-        mm_counts = depth - indel_counts - ref_counts - self.allele_counts["indel_cov"]
-        
+        mm_counts = self.get_mismatch_counts(self.v.REF)
+
         if self.strand == "-":
             ref_nt = bp_comp[self.v.REF]
             
@@ -207,7 +232,8 @@ class AlleleCounter():
             # the AD field is not correct for indels :(
             # See open issue
             # https://github.com/samtools/bcftools/issues/912
-            
+            # IDV is correct for single indels, but need to reparse pileup
+            # for multiple indels
             if len(self.v.ALT) > 1:
                 indel_depths = self.query_indels()
                 self.multiallelic = True
@@ -231,6 +257,11 @@ class AlleleCounter():
                     continue
                 self.allele_counts[self.v.ALT[idx]] += self.alt_depths[idx]
     
+    def get_mismatch_counts(self, ref_nt):
+        nt = {"A", "T", "C", "G"}
+        nt.remove(ref_nt)
+        return sum([self.allele_counts[x] for x in nt])
+        
     def add_indel_depth(self, new_variant):
         new_counter = AlleleCounter(new_variant, self.strand)
         new_counter.allele_counts["indel"] = self.allele_counts["indel"]
@@ -272,7 +303,7 @@ def vcf_to_counts(vcf_fn, bam_fn, out_fn, min_depth = 10, return_comp = False,
   bam = pysam.AlignmentFile(bam_fn)
   n_good_variants = 0
 
-  ic = IndelCache(bam)
+  ic = IndelCache()
   previous_rec = None
   for i,v in enumerate(vcf(region)):
 
@@ -281,7 +312,7 @@ def vcf_to_counts(vcf_fn, bam_fn, out_fn, min_depth = 10, return_comp = False,
       
       if n_good_variants == 0:
           n_good_variants += 1
-          ic = IndelCache(bam, v.CHROM)
+          ic = IndelCache(v.CHROM)
           previous_rec = AlleleCounter(v, bam, strand)
           continue
       
@@ -291,13 +322,19 @@ def vcf_to_counts(vcf_fn, bam_fn, out_fn, min_depth = 10, return_comp = False,
                         ic.n()))
             print(ic)
           ic.clear()
-          ic = IndelCache(bam, v.CHROM)
+          ic = IndelCache(v.CHROM)
+      
+      #pdb.set_trace()
 
       current_rec = AlleleCounter(v, bam, strand)
       
       if current_rec.is_indel:
-        #  pdb.set_trace()
           ic.add(current_rec)
+
+          if previous_rec.v.POS in ic.d:
+              # only happens for insertions
+              ins_count = ic.d.pop(previous_rec.v.POS)
+              previous_rec.allele_counts["indel"] += ins_count
           all_bases = previous_rec
           # dont report indel as single record
           previous_rec = current_rec
@@ -307,10 +344,9 @@ def vcf_to_counts(vcf_fn, bam_fn, out_fn, min_depth = 10, return_comp = False,
               # pop POS from IndelCache()
               icounts = ic.get_indel_depth(current_rec)
               current_rec.allele_counts["indel"] += icounts
-              # need to consume reference depth due to right alignment of
-              # indel, unless next to indel
-#              if not previous_rec.is_indel:
-#                current_rec.allele_counts[current_rec.v.REF] -= icounts
+              if current_rec.v.POS in ic.refdepth:
+                ic_counts = ic.get_indel_skipped_coverage(current_rec)
+                current_rec.allele_counts["indel_cov"] += ic_counts
               all_bases = previous_rec
               previous_rec = current_rec
           else:
@@ -325,14 +361,11 @@ def vcf_to_counts(vcf_fn, bam_fn, out_fn, min_depth = 10, return_comp = False,
       
       if all_bases.is_indel:
             continue
-      # need to check if indel cache is still present at end of contig
-      # debug with printing
-
-      if sum(all_bases.allele_counts.values()) >= min_depth:
+      
+      if all_bases.depth() >= min_depth:
           fo.write(str(all_bases))
-  
   if previous_rec is not None and not previous_rec.is_indel:
-      if sum(all_bases.allele_counts.values()) >= min_depth:
+      if all_bases.depth() >= min_depth:
           fo.write(str(previous_rec))
   
   if debug:
