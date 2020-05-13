@@ -5,7 +5,107 @@ import gzip
 import binascii
 import os
 import sys
+import pdb
 from yaml import load
+
+def is_complex_indel(ref, alt):
+    """
+    compare two indels and determine if indel is a complex mutation
+    https://genome.sph.umich.edu/wiki/Variant_classification
+    """ 
+
+    is_complex = False
+    rl = len(ref)
+    al = len(alt)
+    dl = al - rl
+    if dl == 0:
+        if(rl> 1):
+            raise TypeError("MVPs are not supported")
+        else:
+            raise TypeError("{} is not an indel of {}".format(alt, ref))
+     
+    # trim variants
+    while rl != 1 and al != 1 :
+        if ref[rl-1] == alt[al-1]:
+            rl -= 1
+            al -= 1
+        else:
+            break
+
+    si = 0
+
+    while rl != 1 and al != 1:
+        if ref[si] == alt[si]:
+            rl -= 1
+            al -= 1
+            si += 1
+        else:
+            break
+    ref = ref[si:rl + si]
+    alt = alt[si:al + si]
+    
+    rl = len(ref)
+    al = len(alt)
+
+    if rl == 1:
+      if ref[0] != alt[0] and  ref[0] != alt[-1]:
+        is_complex = True
+    elif al == 1:
+      if alt[0] != ref[0] and  alt[0] != ref[-1]:
+        is_complex = True
+    else:
+      if dl > 0:
+        # insertion
+        for i in range(rl):
+            if  ref[i] != alt[i]:
+                is_complex = True
+                break
+      else:
+          # deletion
+        for i in range(al):
+            if  ref[i] != alt[i]:
+                is_complex = True
+                break
+
+    # need to return trim indicies for 5' or 3'
+    return is_complex
+            
+    
+def conv_args(pileup_args):
+    res = [" "]
+    for k,v in pileup_args.items():
+        if k == "max_depth":
+            res.append("-d")
+            res.append(v)
+            res.append("-L")
+            res.append(v)
+        elif k == "ignore_overlaps":
+            if v:
+                res.append("-x")
+        elif k == "min_base_quality":
+            res.append("-Q")
+            res.append(v)
+        elif k == "min_mapping_quality":
+            res.append("-q")
+            res.append(v)
+        elif k == "compute_baq":
+            if not v:
+                res.append("-B")
+        elif k == "ignore_orphans":
+            if not v:
+                res.append("-A")
+        elif k == "redo_baq":
+            if v:
+                res.append("-E")
+        elif k == "adjust_capq_threshold":
+            res.append("-C")
+            res.append(v)
+        else:
+            sys.exit(k + " not implemented for now")
+    res.append(" ")
+    res = [str(x) for x in res]
+    return " ".join(res)
+
 
 def get_pileup_args(fn = None):
   

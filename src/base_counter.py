@@ -83,17 +83,6 @@ def generate_pileup(bam, fasta, min_depth, deletion_length,
     
     output_tmpbam = outpre + "filteredbam.bam"
 
-   # pileup_cmd =  "samtools view -h " + samflag + " " + bam + " " + region + \
-   #               " | filterBam -d " + str(deletion_length) + \
-   #               " | bcftools " + \
-   #               "mpileup " + \
-   #               "-f " + fasta + " " + \
-   #               additional_args + \
-   #               " - " + \
-   #               " | " + \
-   #               "pileup_to_counts.py -v -  -d " + \
-   #               str(min_depth) + rev_flag + " -o " + output
-    
     bamfilter_cmd = "samtools view -h " + samflag + " " + bam + " " + region + \
                   " | filterBam -d " + str(deletion_length) + \
                   " | samtools view -b " + \
@@ -111,6 +100,7 @@ def generate_pileup(bam, fasta, min_depth, deletion_length,
 
     pileup_cmd =  "bcftools " + \
                   "mpileup " + \
+                  " -a AD " + \
                   "-f " + fasta + " " + \
                   additional_args + \
                   " " + output_tmpbam + " " \
@@ -441,7 +431,7 @@ def setdiff(lst_a, lst_b):
 
 def generate_mismatch_profile(input_bam, fasta, additional_args, depth, outpre, 
         threads, deletion_length, bam_flag, libtype, chroms_to_exclude = None,
-        debug = False):
+        region_to_pileup = None, debug = False):
     
    if debug:
        print("started processing {}".format(str(datetime.now())),
@@ -453,22 +443,8 @@ def generate_mismatch_profile(input_bam, fasta, additional_args, depth, outpre,
 
    ## generate per nucleotide mismatch and indel counts
    if threads == 1:
-       if "-r " in additional_args:
-           ## pass region to samtools view
-           args = additional_args.split()
-           region_idx = args.index("-r")
-           region_to_pileup = args[region_idx + 1]
-           
-           ## don't pass region through additional args
-           ## samtools mpileup wont work with regional arg (input is sam)
-           args.remove("-r")
-           args.remove(region_to_pileup)
-           additional_args = " ".join(args)
-       else:
-           if chroms_to_exclude is not None:
-             region_to_pileup = chroms
-           else:
-             region_to_pileup = None
+       if chroms_to_exclude is not None:
+           region_to_pileup = chroms
        output = generate_pileup(input_bam, fasta, depth, 
                                 deletion_length, additional_args,
                                 bam_flag, libtype,
@@ -483,8 +459,8 @@ def generate_mismatch_profile(input_bam, fasta, additional_args, depth, outpre,
        # generate list of new regional arguments to pass in parallel
        #contigs = retrieve_header(input_bam)
        
-       if "-r " in additional_args:
-           print("-r option is not allowed when running with multiple threads", 
+       if region_to_pileup is not None:
+           print("-r option is not respected when running with multiple threads", 
                  file = sys.stderr)
        
        pool = mp.Pool(threads)
@@ -746,23 +722,6 @@ def main():
                         required = False,
                         default = 'fr-firststrand')
                         
-    parser.add_argument('-p',
-                        '--pileup',
-                        help = textwrap.dedent("""\
-                        additional command line arguments to pass to samtools mpileup 
-                        by default -f is set by the --fasta argument to this script
-                        
-                        The following arguments are set by default, but can be modified.
-                        --ff UNMAP,SECONDARY,QCFAIL,DUP (filter alignments)
-                        -B (disable BAQ calculation) 
-                        -d 1000000 (use up to 1e6 reads per base)
-                        -L 1000000 (use up to 1e6 reads per base for indel calling)
-                        -A count orphan reads (paired end)
-                        -x disable read-pair overlap detection
-                        \n"""), 
-                        required = False,
-                        default = "")
-    
     parser.add_argument('-d',
                         '--depth',
                         help = textwrap.dedent("""\
@@ -833,7 +792,14 @@ def main():
                         required = False,
                         nargs = "+",
                         default = None)
-
+    parser.add_argument('-r',
+                        '--region',
+                        help=textwrap.dedent("""\
+                        region to query (as samtools region string)
+                        (default: %(default)s)
+                        \n"""),
+                        required = False,
+                        default = None)
     parser.add_argument('-v',
                         '--verbose',
                         help="""print run information (default: %(default)s)\n""",
@@ -846,20 +812,11 @@ def main():
     
     parser.add_argument('--default-pileup-args',
                         help = textwrap.dedent("""\
-                        The following arguments are set by default
-                        --ff UNMAP,SECONDARY,QCFAIL,DUP (filter alignments)
-                        -B (disable BAQ calculation)
-                        -d 100000 (use up to 1e5 reads per base)
-                        -I dont call indels
-                        -A count orphan reads (paired end)
-                        -Q 0
-                        -x disable read-pair overlap detection
-                        -a AD
-                        pass a string to replace these args
+                        supply custom yaml file with pileup arguments.
+                        See pileup.yaml for available arguments.
                         (default: %(default)s)\n"""
                         ),
-                        required = False,
-                        default = " --ff UNMAP,SECONDARY,QCFAIL,DUP -Q 0 -a AD -A -x -d 100000 -L 100000 -B -O v ")
+                        required = False)
     
     args = parser.parse_args()
     
@@ -872,13 +829,15 @@ def main():
     
     if not is_tool("samtools"):
         sys.exit("samtools is not in path")
+    if not is_tool("bcftools"):
+        sys.exit("bcftools is not in path")
     if not is_tool("pileup_to_counts.py"):
         sys.exit("pileup_to_counts.py is not in path, please add rnastruct/src to your PATH")
     if not is_tool("filterBam"):
         sys.exit("filterBam is not in path, please add rnastruct/src to your PATH")
 
-    # ok to have repeated args in samtools command
-    pileup_args = args.default_pileup_args + " " +args.pileup    
+    
+    pileup_args = conv_args(get_pileup_args(args.default_pileup_args))
     fasta_name = args.fasta
     depth = args.depth
     outpre = args.outpre
@@ -890,7 +849,8 @@ def main():
     strandedness = args.strandedness
     skip_singles = args.skip_single_reads
     chroms_to_skip = args.chroms_to_skip
-    
+    region = args.region
+   
     #### check options
     if not os.path.isfile(fasta_name):
         sys.exit("input fasta {} not found".format(fasta_name))
@@ -975,6 +935,7 @@ def main():
           " ",
           align_type,
           chroms_to_skip,
+          region,
           verbose) 
           
       pileup_tbls.append(pileup_tbl)

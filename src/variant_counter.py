@@ -152,6 +152,7 @@ def scan_bam(bam_fn, vcf_fn, only_indels, pup_args):
       pileup_itr = bam_fh.pileup(variant.CHROM, variant.start,
               variant.start + 1, 
               truncate = True, 
+              stepper = 'all',
               **pup_args)
       res = count_variants(pileup_itr, variant)    
       

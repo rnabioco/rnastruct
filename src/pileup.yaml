@@ -1,5 +1,6 @@
 # see https://pysam.readthedocs.io/en/latest/api.html?highlight=bam_funmap#pysam.AlignmentFile.pileup
-# for argument documention
+# for argument documention. Equivalent arguments will be passed to
+# bcftools mpileup
 # only args shown here are supported
 max_depth: 100000
 ignore_overlaps: False 
@@ -9,4 +10,3 @@ compute_baq: False
 ignore_orphans: False
 redo_baq: False
 adjust_capq_threshold: 0
-stepper: 'nofilter'

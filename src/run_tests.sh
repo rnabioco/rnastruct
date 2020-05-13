@@ -25,7 +25,7 @@ if [[ "$c_flag" == 'true' ]]; then
    rm -rf test_data/base_counter
 fi
 
-set -x
+set -e -x
 
 if [[ "$l_flag" == "true" ]]; then
     echo "running local tests"

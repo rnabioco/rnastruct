@@ -80,6 +80,7 @@ class IndelCache():
                       del_length = parse_pileup_variant(var)
                   else:    
                   # report left aligned position, offset by length of deletion
+                  # or report insertion at position immediately 5'
                       del_length = max(len(ac.v.REF) - len(var), 1)
                   self.d[ac.v.POS + del_length] += depth
                   for i in range(ac.v.POS + 1, ac.v.POS + del_length):
@@ -221,7 +222,6 @@ class AlleleCounter():
             # need to look into if right alignment of the indel is
             # going to mess this up
 
-            # not sure this is important...
             self.indel_pos = self.v.POS + 1
             
         elif is_snp(self.v):
