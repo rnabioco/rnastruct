@@ -3,7 +3,7 @@
 # bcftools mpileup
 # only args shown here are supported
 max_depth: 100000
-ignore_overlaps: False 
+ignore_overlaps: True 
 min_base_quality: 0
 min_mapping_quality: 0
 compute_baq: False
