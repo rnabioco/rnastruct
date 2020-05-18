@@ -29,7 +29,7 @@ from shutil import which
 from operator import itemgetter
 
 from utils import * 
-
+import pileup_to_counts
 
 bp_dict = {
         "A" : "T",
@@ -97,26 +97,43 @@ def generate_pileup(bam, fasta, min_depth, deletion_length,
     if verbose:
         print("bamfilter command is:\n" + filter_run.args, 
                 file = sys.stderr)
-
-    pileup_cmd =  "bcftools " + \
-                  "mpileup " + \
-                  " -a AD " + \
-                  "-f " + fasta + " " + \
-                  additional_args + \
-                  " " + output_tmpbam + " " \
-                  " | " + \
-                  "pileup_to_counts.py -v -  -d " + \
-                  str(min_depth) + rev_flag + " -o " + output + \
-                  " -b " + output_tmpbam
-    
-    pileup_run = subprocess.run(pileup_cmd, 
-            shell=True, 
+    mpileup_args = conv_args(additional_args)
+#    pileup_args = []
+#    for k,v in pileup_args.items():
+#      pileup_args.append("{}={}".format(k,v))
+#
+#    pileup_args = " ".join(pileup_args)
+#    pileup_cmd =  "bcftools " + \
+#                  "mpileup " + \
+#                  " -a AD " + \
+#                  "-f " + fasta + " " + \
+#                  mpileup_args + \
+#                  " " + output_tmpbam + " " \
+#                  " | " + \
+#                  "pileup_to_counts.py -v -  -d " + \
+#                  str(min_depth) + rev_flag + " -o " + output + \
+#                  " -b " + output_tmpbam
+#                  " --pileup-args " + pileup_args + " " 
+    mpileup_args = mpileup_args.split()
+    pileup_cmd =  ["bcftools", "mpileup", "-a", "AD", "-f", fasta] + \
+                  mpileup_args + [output_tmpbam] 
+    pileup_run = subprocess.Popen(pileup_cmd, 
+            shell=False, 
             stderr = sys.stderr, 
-            stdout = sys.stdout)
+            stdout = subprocess.PIPE)
+    
+    # cyvcf2 can use a file descriptor to open vcf 
+    pileup_to_counts.vcf_to_counts(pileup_run.stdout.fileno(),
+                                   output_tmpbam,
+                                   output,
+                                   additional_args,
+                                   min_depth = min_depth,
+                                   return_comp = libtype == "antisense",
+                                   debug = False)
     
     if verbose:
 
-        print("pileup command is:\n" + pileup_run.args, 
+        print("pileup command is:\n" + " ".join(pileup_run.args), 
                 file =sys.stderr)
         print("formatted pileup output is here:\n" + output, 
                 file = sys.stderr)
@@ -810,13 +827,20 @@ def main():
                         help="""don't delete temp files (default: %(default)s)\n""",
                         action = 'store_false')
     
-    parser.add_argument('--default-pileup-args',
-                        help = textwrap.dedent("""\
-                        supply custom yaml file with pileup arguments.
-                        See pileup.yaml for available arguments.
-                        (default: %(default)s)\n"""
-                        ),
-                        required = False)
+    parser.add_argument("--pileup-args",
+                      nargs='+',
+                      action=kvdictAppendAction,
+                      metavar="KEY=VALUE",
+                      help=textwrap.dedent("""\
+                      Add key/value pileup arguments to overwrite
+                      defaults, also can use --pileup-arg-fn to specify args\n"""
+                      ))
+    parser.add_argument("--pileup-arg-fn",
+                      help=textwrap.dedent("""\
+                      specify custom pileup.yaml file to overwrite default
+                      arguments\n"""
+                      ),
+                      required = False)
     
     args = parser.parse_args()
     
@@ -837,7 +861,7 @@ def main():
         sys.exit("filterBam is not in path, please add rnastruct/src to your PATH")
 
     
-    pileup_args = conv_args(get_pileup_args(args.default_pileup_args))
+    pileup_args = get_pileup_args(args.pileup_arg_fn, args.pileup_args)
     fasta_name = args.fasta
     depth = args.depth
     outpre = args.outpre

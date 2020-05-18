@@ -157,9 +157,10 @@ class IndelCache():
 class AlleleCounter():
     "Single sample allele counter for bcftools mpileup VCF"
     
-    def __init__(self, variant, bam, strand = "+"):
+    def __init__(self, variant, bam, pup_args, strand = "+"):
         self.v = variant
         self.b = bam
+        self.pileup_args = pup_args
         self.strand = strand
         self.ref_depths = np.array(variant.gt_ref_depths[0])
         self.alt_depths = np.array(variant.format('AD')[0][1:])
@@ -222,7 +223,7 @@ class AlleleCounter():
                                    self.v.start,
                                    self.v.start + 1,
                                    truncate = True,
-                                   **utils.pileup_args)
+                                   **self.pileup_args)
         
         return variant_counter.count_variants(pileup_itr, self.v)
         
@@ -259,7 +260,8 @@ class AlleleCounter():
     
     def get_mismatch_counts(self, ref_nt):
         nt = {"A", "T", "C", "G"}
-        nt.remove(ref_nt)
+        if ref_nt in nt:
+            nt.remove(ref_nt)
         return sum([self.allele_counts[x] for x in nt])
         
     def add_indel_depth(self, new_variant):
@@ -288,7 +290,7 @@ def write_header(fo):
   
   fo.write("\t".join(tbl_cols) + "\n")
 
-def vcf_to_counts(vcf_fn, bam_fn, out_fn, min_depth = 10, return_comp = False,
+def vcf_to_counts(vcf_fn, bam_fn, out_fn, pileup_args, min_depth = 10, return_comp = False,
         n_records= -1, debug = True, region = None): 
       
   if return_comp:
@@ -296,7 +298,10 @@ def vcf_to_counts(vcf_fn, bam_fn, out_fn, min_depth = 10, return_comp = False,
   else:
       strand = "+"
   
-  fo = gzip.open(out_fn, 'wt')
+  if out_fn == "-":
+    fo = sys.stdout
+  else:
+    fo = gzip.open(out_fn, 'wt')
   
   write_header(fo)
   vcf = VCF(vcf_fn)
@@ -309,11 +314,11 @@ def vcf_to_counts(vcf_fn, bam_fn, out_fn, min_depth = 10, return_comp = False,
 
       if i == n_records:
           break
-      
+
       if n_good_variants == 0:
           n_good_variants += 1
           ic = IndelCache(v.CHROM)
-          previous_rec = AlleleCounter(v, bam, strand)
+          previous_rec = AlleleCounter(v, bam, pileup_args, strand)
           continue
       
       if ic.chrom != v.CHROM:
@@ -324,9 +329,10 @@ def vcf_to_counts(vcf_fn, bam_fn, out_fn, min_depth = 10, return_comp = False,
           ic.clear()
           ic = IndelCache(v.CHROM)
       
+      if v.INFO.get('DP') < min_depth and v.POS not in ic.d and v.POS not in ic.refdepth:
+          continue
       #pdb.set_trace()
-
-      current_rec = AlleleCounter(v, bam, strand)
+      current_rec = AlleleCounter(v, bam, pileup_args, strand)
       
       if current_rec.is_indel:
           ic.add(current_rec)
@@ -365,7 +371,7 @@ def vcf_to_counts(vcf_fn, bam_fn, out_fn, min_depth = 10, return_comp = False,
       if all_bases.depth() >= min_depth:
           fo.write(str(all_bases))
   if previous_rec is not None and not previous_rec.is_indel:
-      if all_bases.depth() >= min_depth:
+      if previous_rec.depth() >= min_depth:
           fo.write(str(previous_rec))
   
   if debug:
@@ -376,11 +382,11 @@ def vcf_to_counts(vcf_fn, bam_fn, out_fn, min_depth = 10, return_comp = False,
   vcf.close()
   fo.close()
 
+
 if __name__ == '__main__':
     
     parser = argparse.ArgumentParser(description="""
-    description""",
-    formatter_class = argparse.RawTextHelpFormatter )
+    description""")
 
     parser.add_argument('-v',
                         '--vcf',
@@ -423,6 +429,20 @@ if __name__ == '__main__':
                         requires a vcf indexed by bcftools
                         """,
                         required = False)
+    
+    parser.add_argument("--pileup-args",
+                      nargs='+',
+                      action=utils.kvdictAppendAction,
+                      metavar="KEY=VALUE",
+                      help="""Add key/value pileup arguments to overwrite
+                      defaults, also can use --pileup-arg-file to specify
+                      args""")
+    parser.add_argument("--pileup-arg-fn",
+                      help="""
+                      specify custom pileup.yaml file to overwrite default
+                      arguments
+                      """,
+                      required = False)
     parser.add_argument('--verbose',
                         help = """
                         (default: %(default)s)
@@ -430,8 +450,11 @@ if __name__ == '__main__':
                         action = 'store_true')
     
     args = parser.parse_args()
-    
+    pileup_arguments = utils.get_pileup_args(args.pileup_arg_fn, args.pileup_args)
     nrecords = -1 
-    vcf_to_counts(args.vcf, args.bam, args.output, int(args.depth), args.complement,
-            debug = args.verbose, region = args.query_region, n_records = nrecords)
+
+    vcf_to_counts(args.vcf, args.bam, args.output,
+            pileup_arguments, int(args.depth), args.complement,
+            debug = args.verbose, region = args.query_region, n_records =
+            nrecords)
 

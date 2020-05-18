@@ -3,7 +3,7 @@ import os
 import pileup_to_counts
 
 
-class TestBaseCounter:
+class TestSimple:
     """ testing output file content for now """
     fwd_pre = "test_data/base_counter/fwd_"
     rev_pre = "test_data/base_counter/rev_"
@@ -82,3 +82,9 @@ class TestBaseCounter:
             strands.add(fields[2])
 
           assert len(strands) == 1
+
+#class TestComplex:
+#    bam="test_data/pileup_to_counts/chr16_fus.bam"
+#    
+#    def test_fus(self):
+

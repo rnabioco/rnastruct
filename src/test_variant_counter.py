@@ -4,7 +4,7 @@ import variant_counter
 import pysam
 import yaml
 from cyvcf2 import VCF
-from yaml import load, dump
+from yaml import load, SafeLoader
 
 class TestPosStrand:
     bam_fn = "test_data/variant_counter/chr16_fus_dms_delfixed.bam"
@@ -17,10 +17,7 @@ class TestPosStrand:
     with open(config_fn) as f:
         config_data = f.read()
 
-    pup_args = load(config_data)
-    
-    #def test_basic_usage(self):
-    #    bam_name = variant_counter.scan_bam(self.bam_fn, self.vcf_fn, True, self.pup_args)
+    pup_args = load(config_data, Loader = SafeLoader)
     
     def test_count_variants(self):
         

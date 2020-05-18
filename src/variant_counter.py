@@ -8,7 +8,7 @@ import re
 
 from cyvcf2 import VCF
 from collections import Counter
-from yaml import load, dump
+from yaml import load, SafeLoader
 
 from utils import * 
 
@@ -71,7 +71,7 @@ def pileup_variant_to_vcf(ref, pileup_variants, vcf_variants):
     return(var_dict)
 
         
-def count_variants(pileup, variant, warn_allele_mismatch = True):
+def count_variants(pileup, variant, warn_allele_mismatch = False):
     """
     given pysam alignments at a position
     determine how many have the variant
@@ -212,7 +212,7 @@ def main():
     with open(config_fn) as f:
         config_data = f.read()
 
-    pup_args = load(config_data)
+    pup_args = load(config_data, Loader = SafeLoader)
     
     bam_name = scan_bam(args.bam, args.vcf, args.indels, pup_args)
                 

@@ -1,9 +1,10 @@
 import gzip
 import os
 import pileup_to_counts
+import utils
 
 class TestPileuptocounts:
-    
+  
   def test_fwd(self, tmp_path):
     vcf = "test_data/small_fwd.vcf"
     bam = "test_data/small.fwd.bam"
@@ -13,6 +14,7 @@ class TestPileuptocounts:
     pileup_to_counts.vcf_to_counts(vcf, 
             bam,
             out, 
+            utils.get_pileup_args(),
             min_depth = min_depth_arg, 
             return_comp = False,
             debug = False)
@@ -60,6 +62,7 @@ class TestPileuptocounts:
     pileup_to_counts.vcf_to_counts(vcf, 
             bam,
             out, 
+            utils.get_pileup_args(),
             min_depth = min_depth_arg, 
             return_comp = True,
             debug = False)
@@ -100,15 +103,16 @@ class TestPileuptocounts:
   
 
   def test_indels_pos(self, tmp_path):
-      vcf = "test_data/pileup_to_counts/fus_dms.vcf"
-      bam = "test_data/chr16_fus_dms.bam"
+      vcf = "test_data/pileup_to_counts/fus.overlaps.vcf.gz"
+      bam = "test_data/pileup_to_counts/chr16_fus.bam"
       out =  tmp_path / "fus_counts.tsv.gz"
       min_depth_arg = 1
-      expected_output = "test_data/expected_pileup_to_counts.tsv"
-
+      expected_output = "test_data/pileup_to_counts/expected_pileup_to_counts_pos_overlaps.tsv"
+      
       pileup_to_counts.vcf_to_counts(vcf, 
             bam,
             out, 
+            utils.get_pileup_args(custom_args = {"ignore_overlaps":False}),
             min_depth = min_depth_arg, 
             return_comp = False,
             debug = False)
@@ -129,15 +133,16 @@ class TestPileuptocounts:
                   assert False , msg 
               
   def test_indels_neg(self, tmp_path):
-      vcf = "test_data/pileup_to_counts/top2a_dms.vcf"
-      bam = "test_data/pileup_to_counts/top2a_dms.bam"
+      vcf = "test_data/pileup_to_counts/top2a.overlaps.vcf.gz"
+      bam = "test_data/pileup_to_counts/chr17_top2a.bam"
       out =  tmp_path / "top2a_counts.tsv.gz"
       min_depth_arg = 10
-      expected_output = "test_data/expected_pileup_to_counts_small.tsv"
-
+      expected_output = "test_data/pileup_to_counts/expected_pileup_to_counts_neg_overlaps.tsv"
+      
       pileup_to_counts.vcf_to_counts(vcf, 
             bam,
             out, 
+            utils.get_pileup_args(custom_args = {"ignore_overlaps":False}),
             min_depth = min_depth_arg, 
             return_comp = True,
             debug = False)

@@ -6,7 +6,8 @@ import binascii
 import os
 import sys
 import pdb
-from yaml import load
+import argparse
+from yaml import load, SafeLoader
 
 def is_complex_indel(ref, alt):
     """
@@ -73,17 +74,26 @@ def is_complex_indel(ref, alt):
     
 def conv_args(pileup_args):
     res = [" "]
+    detect_overlaps = True
     for k,v in pileup_args.items():
+        
         if k == "max_depth":
             res.append("-d")
             res.append(v)
             res.append("-L")
             res.append(v)
         elif k == "ignore_overlaps":
-            if v:
+            if not v:
+                detect_overlaps = False
                 res.append("-x")
         elif k == "min_base_quality":
             res.append("-Q")
+            if detect_overlaps:
+                # htslib will set base quality to 0 for 1 mate
+                # when overlap detection is enabled
+                # therefore must ahve at least -Q 1 to remove overlapping
+                # reads
+                v = max(1, v)
             res.append(v)
         elif k == "min_mapping_quality":
             res.append("-q")
@@ -107,7 +117,7 @@ def conv_args(pileup_args):
     return " ".join(res)
 
 
-def get_pileup_args(fn = None):
+def get_pileup_args(fn = None, custom_args = None):
   
   if fn is not None:
     config_fn = fn
@@ -116,12 +126,30 @@ def get_pileup_args(fn = None):
                          "pileup.yaml")
   with open(config_fn) as f:
       config_data = f.read()
-  pileup_args = load(config_data)
+  pileup_args = load(config_data, Loader=SafeLoader)
+  
+  if custom_args is not None:
+      for arg, val in custom_args.items():
+          try:
+              def_val = pileup_args[arg]
+              def_val_type = type(def_val)
+              if def_val_type == float:
+                  val = float(val)
+              elif def_val_type == int:
+                  val = int(val)
+              elif def_val_type == str:
+                  val = str(val)
+              pileup_args[arg] = val
+          except:
+              print("Ignoring {}:{} not recognized as pileup arguments".format(arg, val),
+                      file = sys.stderr)
+  
+  if pileup_args["ignore_overlaps"] is True:
+      pileup_args["min_base_quality"] = max(1, pileup_args["min_base_quality"])
   
   return pileup_args
-  
-pileup_args = get_pileup_args()
 
+  
 def cleanup(tmp_dir, delete = True):
     
     if delete:
@@ -422,4 +450,22 @@ def split_bam(bam, outbam, flags, threads = 1, memory = "2G", force = True):
 
     
 
+class kvdictAppendAction(argparse.Action):
+    """
+    argparse action to split an argument into KEY=VALUE form
+    on the first = and append to a dictionary.
+    based on :
+    https://stackoverflow.com/questions/27146262/create-variable-key-value-pairs-with-argparse-python
+    @Craig Ringer
+    """
+    def __call__(self, parser, args, values, option_string=None):
+        for value in values:
+          assert(type(value) == str)
+          try:
+              (k, v) = value.split("=", 2)
+          except ValueError as ex:
+              raise argparse.ArgumentError(self, f"could not parse argument \"{value[0]}\" as k=v format")
+          d = getattr(args, self.dest) or {}
+          d[k] = v
+          setattr(args, self.dest, d)
 
