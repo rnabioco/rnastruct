@@ -1,9 +1,9 @@
 import gzip
 import os
-import pileup_to_counts
+import vcf_to_counts
 import utils
 
-class TestPileuptocounts:
+class TestVcftocounts:
   
   def test_fwd(self, tmp_path):
     vcf = "test_data/small_fwd.vcf"
@@ -11,7 +11,7 @@ class TestPileuptocounts:
     out = tmp_path / "counts.tsv.gz"
     min_depth_arg = 100
     
-    pileup_to_counts.vcf_to_counts(vcf, 
+    vcf_to_counts.vcf_to_counts(vcf, 
             bam,
             out, 
             utils.get_pileup_args(),
@@ -59,7 +59,7 @@ class TestPileuptocounts:
     out = tmp_path / "counts.tsv.gz"
     min_depth_arg = 100
     
-    pileup_to_counts.vcf_to_counts(vcf, 
+    vcf_to_counts.vcf_to_counts(vcf, 
             bam,
             out, 
             utils.get_pileup_args(),
@@ -109,7 +109,7 @@ class TestPileuptocounts:
       min_depth_arg = 1
       expected_output = "test_data/pileup_to_counts/expected_pileup_to_counts_pos_overlaps.tsv"
       
-      pileup_to_counts.vcf_to_counts(vcf, 
+      vcf_to_counts.vcf_to_counts(vcf, 
             bam,
             out, 
             utils.get_pileup_args(custom_args = {"ignore_overlaps":False}),
@@ -139,7 +139,7 @@ class TestPileuptocounts:
       min_depth_arg = 10
       expected_output = "test_data/pileup_to_counts/expected_pileup_to_counts_neg_overlaps.tsv"
       
-      pileup_to_counts.vcf_to_counts(vcf, 
+      vcf_to_counts.vcf_to_counts(vcf, 
             bam,
             out, 
             utils.get_pileup_args(custom_args = {"ignore_overlaps":False}),

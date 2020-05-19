@@ -3,5 +3,5 @@ numpy>=1.17.2
 pysam>=0.15.3
 Cython>=0.29.13
 cyvcf2>=0.11.5
-dask>=2.5.2
+dask[dataframe]>=2.5.2
 PyYAML>=3.13

@@ -5,22 +5,19 @@
 
 ## Requirements
 This pipeline requires the following programs and has been tested on
-MacOS:
+MacOS and linux:
 
 [`samtools`](http://www.htslib.org/download/)  
-[`bcftools`](http://www.htslib.org/download/)  
 [`python3`](https://www.python.org/downloads/)   
 
-Also python packages `pandas`, `cyvcf2`, `pysam`, and `dask`
-A C/C++ compiler with C++11 support (i.e. gcc or clang, available for
-macOS by installing the `Xcode` command line tools)
+Also python packages `pandas`, `cyvcf2`, `pysam`, and `dask`. See
+`requirements.txt` for additional requirements
 
 ## Install 
 
 ```bash
 git clone git@github.com:rnabioco/rnastruct
 cd rnastruct/src
-make
 ```
 
 Add `src` directory to your path by editing your `.bash_profile`
@@ -40,11 +37,11 @@ Test your install
 ```bash
 $ base_counter.py -h
 usage: base_counter.py [-h] -b BAM -f FASTA [-L LIBRARY] [-s STRANDEDNESS]
-                       [-p PILEUP] [-d DEPTH] [-l DELETION_LENGTH] [-o OUTPRE]
-                       [-t THREADS] [-n NUCLEOTIDES] [-ss] [-i]
-                       [-c CHROMS_TO_SKIP [CHROMS_TO_SKIP ...]] [-v] [-k]
-                       [--write-bgs]
-                       [--default-pileup-args DEFAULT_PILEUP_ARGS]
+                       [-d DEPTH] [-l DELETION_LENGTH] [-o OUTPRE]
+                       [-t THREADS] [-n NUCLEOTIDES] [-ss]
+                       [-c CHROMS_TO_SKIP [CHROMS_TO_SKIP ...]] [-r REGION]
+                       [-v] [-k] [--pileup-args KEY=VALUE [KEY=VALUE ...]]
+                       [--pileup-arg-fn PILEUP_ARG_FN]
 
     Parse bam file and enumerate mismatches, insertions, and deletions per
     nucleotide. Generates bedgraphs for mismatches, insertions and
@@ -52,7 +49,12 @@ usage: base_counter.py [-h] -b BAM -f FASTA [-L LIBRARY] [-s STRANDEDNESS]
 
 optional arguments:
   -h, --help            show this help message and exit
-  -b BAM, --bam BAM     indexed bam file input
+  -b BAM, --bam BAM     indexed bam file input,
+                                                by default the bam will be split into
+                                                forward and reverse bams,
+                                                pass the forward and reverse bams
+                                                to bypass splitting the bams
+                                                (i.e. forward.bam,reverse.bam)
 
   -f FASTA, --fasta FASTA
                         path to fasta file indexed with samtools faidx,
@@ -74,18 +76,6 @@ optional arguments:
 
                           'unstranded' = report strandedness without respect to R1 or R2
                           (default: fr-firststrand)
-
-  -p PILEUP, --pileup PILEUP
-                        additional command line arguments to pass to samtools mpileup
-                        by default -f is set by the --fasta argument to this script
-
-                        The following arguments are set by default, but can be modified.
-                        --ff UNMAP,SECONDARY,QCFAIL,DUP (filter alignments)
-                        -B (disable BAQ calculation)
-                        -d 1000000 (use up to 1e6 reads per base)
-                        -L 1000000 (use up to 1e6 reads per base for indel calling)
-                        -A count orphan reads (paired end)
-                        -x disable read-pair overlap detection
 
   -d DEPTH, --depth DEPTH
                         minimum read coverage required for
@@ -117,28 +107,23 @@ optional arguments:
                         (default: False , single end reads are
                         counted by default)
 
-  -i, --tabix-index     If set, report pileup table
-                        as bgzip'd and tabix indexed
-                        (default: False)
-
   -c CHROMS_TO_SKIP [CHROMS_TO_SKIP ...], --chroms-to-skip CHROMS_TO_SKIP [CHROMS_TO_SKIP ...]
                         space separated list of chroms to ignore
+                        (default: None)
+
+  -r REGION, --region REGION
+                        region to query (as samtools region string)
                         (default: None)
 
   -v, --verbose         print run information (default: False)
   -k, --keep-temp-files
                         don't delete temp files (default: True)
-  --default-pileup-args DEFAULT_PILEUP_ARGS
-                        The following arguments are set by default
-                        --ff UNMAP,SECONDARY,QCFAIL,DUP (filter alignments)
-                        -B (disable BAQ calculation)
-                        -d 1000000 (use up to 1e6 reads per base)
-                        -I dont call indels
-                        -A count orphan reads (paired end)
-                        -x disable read-pair overlap detection
-                        -a AD
-                        pass a string to replace these args
-                        (default:  --ff UNMAP,SECONDARY,QCFAIL,DUP -a AD -A -x -d 100000 -L 100000 -B -O v )
+  --pileup-args KEY=VALUE [KEY=VALUE ...]
+                        Add key/value pileup arguments to overwrite
+                        defaults, also can use --pileup-arg-fn to specify args
+  --pileup-arg-fn PILEUP_ARG_FN
+                        specify custom pileup.yaml file to overwrite default
+                        arguments
 ```
 
 ## Generate mismatch and indel bedgraphs
@@ -146,14 +131,17 @@ optional arguments:
 `base_counter.py` is a python script that generates per nucleotide counts of indels and mismatches in 
 a tabix indexed flat tsv file. 
 
-The script generates and parses the output from running bcftools
+The script generates and parses the output from running samtools
 [`mpileup`](http://www.htslib.org/doc/bcftools.html) and 
-`pileup_to_counts.py`
+`mpileup_to_counts.py`
 
 ```bash
 base_counter.py \
   -b alignments.bam \
-  -f genome.fasta 
+  -f genome.fasta \
+  -n 'ATCG' \
+  -o "outfile/out_" 
+
 ```
 
 The following files will be generated:
@@ -178,4 +166,25 @@ of each nucleotide, indels, and deletions.
 The `.bedgraph.gz` files are strand specific bedgraphs for mismatches and
 indels. 
 
+
+## Subtract background signals and normalize
+
+```
+filter_and_norm.py \
+  -t dms_pileup_table.tsv.bgz \
+  -u untreated_pileup_table.tsv.bgz \
+  -p norm_pileup_table.tsv.bgz
+
+```
+
+
+## Generate bedgraphs from tabix pileup tables
+
+```
+tabix_to_bedgraph.py \
+  -i norm_pileup_table.tsv.bgz \
+  -c 20 # column to retrieve as score
+  -s "+" #strand to retrieve
+
+```
 
