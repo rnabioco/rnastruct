@@ -142,7 +142,7 @@ class PileupCounter():
         return out
 
     def read_line(self, line):
-        fields = line.split("\t")
+        fields = line.rstrip().split("\t")
         self.chrom = fields[0]
         self.pos = int(fields[1])
         self.base = fields[2]

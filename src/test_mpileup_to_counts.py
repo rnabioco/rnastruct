@@ -4,11 +4,132 @@ import mpileup_to_counts
 import utils
 import subprocess
 import sys
-
+import pandas as pd
 class TestParsingPileup:
     "read pileup format from test file and test"
+    plp_fn = "test_data/mpileup_to_counts/pileups_to_test.txt"
+
+    def test_basic(self, tmp_path):
+        out_fn = tmp_path / "out.tsv.gz"
+        out_fn = str(out_fn)
+  
+        f = open(self.plp_fn, 'r')
+        fo = gzip.open(out_fn, 'wt')
+
+        mpileup_to_counts.mpileup_to_counts(f,
+                    fo,
+                    min_depth = 10, 
+                    max_del = 100)
+        f.close()
+        fo.close()
+        assert os.path.isfile(out_fn)
+        
+        df = pd.read_csv(out_fn, sep = "\t")
+        
+        assert all(df["strand"] == "+")
+        assert all(df["depth"] > 10)
+        assert all(df[df["pos"] == 31199145]["depth"] == 63)
+        assert all(df[df["pos"] == 31199145]["refcount"] == 61)
+        assert all(df[df["pos"] == 31199145]["tcount"] == 1)
+        assert all(df[df["pos"] == 31199145]["mmcount"] == 1)
+        # 7nt deletion reported
+        assert all(df[df["pos"] == 31199146]["indelcount"] == 1)
+        assert all(df[df["pos"] == 31199198]["indelcount"] == 17)
+        assert all(df[df["pos"] == 31199197]["depth"] == 109)
+        assert all(df[df["pos"] == 31199198]["depth"] == 106)
+               
+        assert all(df[df["pos"] == 31199185]["indelcount"] == 4)
+        assert all(df[df["pos"] == 31199186]["indelcount"] == 10)
+        assert all(df[df["pos"] == 31199187]["indelcount"] == 2)
+        assert all(df[df["pos"] == 31199188]["indelcount"] == 2)
+
+    def test_drop_deletions(self, tmp_path):
+        out_fn = tmp_path / "out.tsv.gz"
+        out_fn = str(out_fn)
+  
+        f = open(self.plp_fn, 'r')
+        fo = gzip.open(out_fn, 'wt')
+
+        mpileup_to_counts.mpileup_to_counts(f,
+                    fo,
+                    min_depth = 10, 
+                    max_del = 4)
+        f.close()
+        fo.close()
+        assert os.path.isfile(out_fn)
+        
+        df = pd.read_csv(out_fn, sep = "\t")
+        
+        assert all(df["strand"] == "+")
+        assert all(df["depth"] > 10)
+        assert all(df[df["pos"] == 31199145]["depth"] == 62)
+        assert all(df[df["pos"] == 31199145]["refcount"] == 61)
+        assert all(df[df["pos"] == 31199145]["tcount"] == 1)
+        assert all(df[df["pos"] == 31199145]["mmcount"] == 1)
+        # 7nt not deletion reported
+        assert all(df[df["pos"] == 31199146]["indelcount"] == 0)
+        assert all(df[df["pos"] == 31199198]["indelcount"] == 17)
+        assert all(df[df["pos"] == 31199197]["depth"] == 109)
+        assert all(df[df["pos"] == 31199198]["depth"] == 106)
 
 
+    def test_complement(self, tmp_path):
+        out_fn = tmp_path / "out.tsv.gz"
+        out_fn = str(out_fn)
+  
+        f = open(self.plp_fn, 'r')
+        fo = gzip.open(out_fn, 'wt')
+
+        mpileup_to_counts.mpileup_to_counts(f,
+                    fo,
+                    min_depth = 10,
+                    return_comp = True,
+                    max_del = 4)
+        f.close()
+        fo.close()
+        assert os.path.isfile(out_fn)
+        
+        df = pd.read_csv(out_fn, sep = "\t")
+        
+        assert all(df["strand"] == "-")
+        assert all(df["depth"] > 10)
+        assert all(df[df["pos"] == 31199145]["ref_base"] == "C")
+        assert all(df[df["pos"] == 31199145]["depth"] == 62)
+        assert all(df[df["pos"] == 31199145]["refcount"] == 61)
+        assert all(df[df["pos"] == 31199145]["ccount"] == 61)
+        assert all(df[df["pos"] == 31199145]["acount"] == 1)
+        assert all(df[df["pos"] == 31199145]["mmcount"] == 1)
+        # 7nt not deletion reported
+        assert all(df[df["pos"] == 31199146]["indelcount"] == 0)
+        assert all(df[df["pos"] == 31199197]["indelcount"] == 15)
+        assert all(df[df["pos"] == 31199198]["indelcount"] == 2)
+        assert all(df[df["pos"] == 31199197]["depth"] == 109)
+        assert all(df[df["pos"] == 31199198]["depth"] == 106)
+        
+        assert all(df[df["pos"] == 31199185]["indelcount"] == 0)
+        assert all(df[df["pos"] == 31199186]["indelcount"] == 18)
+        assert all(df[df["pos"] == 31199187]["indelcount"] == 0)
+        assert all(df[df["pos"] == 31199188]["indelcount"] == 0)
+
+    def test_basic(self, tmp_path):
+        out_fn = tmp_path / "out.tsv.gz"
+        out_fn = str(out_fn)
+  
+        f = open(self.plp_fn, 'r')
+        fo = gzip.open(out_fn, 'wt')
+
+        mpileup_to_counts.mpileup_to_counts(f,
+                    fo,
+                    min_depth = 200, 
+                    max_del = 4)
+        f.close()
+        fo.close()
+        assert os.path.isfile(out_fn)
+        
+        df = pd.read_csv(out_fn, sep = "\t")
+        
+        assert all(df["strand"] == "+")
+        assert all(df["depth"] > 200)
 class TestPileuptocounts:
 
   def test_indels_pos(self, tmp_path):
