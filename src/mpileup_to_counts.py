@@ -302,11 +302,6 @@ def mpileup_to_counts(fh, out_fh, min_depth = 10, return_comp = False,
       if current_rec.has_indel:
           ic.add(current_rec)
 
-     #     if previous_rec.pos in ic.d:
-     #         # only happens for insertions
-     #         ins_count = ic.d.pop(previous_rec.pos)
-     #         previous_rec.indelcount += ins_count
-     
       if current_rec.pos in ic.d:
          icounts = ic.get_indel_depth(current_rec)
          current_rec.indelcount += icounts
@@ -377,14 +372,6 @@ if __name__ == '__main__':
                         default = 4, 
                         type = int)
 
-    parser.add_argument('-q',
-                        '--query-region',
-                        help = """
-                        query supplied region e.g. ch17:38544980-38544982
-                        requires a vcf indexed by bcftools
-                        """,
-                        required = False)
-    
     parser.add_argument('--verbose',
                         help = """
                         (default: %(default)s)
@@ -405,5 +392,5 @@ if __name__ == '__main__':
 
     mpileup_to_counts(fh, fo,
             int(args.depth), args.complement,
-            debug = args.verbose, max_del = args.deletion_length, region = args.query_region)
+            debug = args.verbose, max_del = args.deletion_length)
 

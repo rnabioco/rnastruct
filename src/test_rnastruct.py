@@ -1,7 +1,6 @@
 import gzip
 import os
 import sys
-import pileup_to_counts
 import subprocess
 import shutil
 import pysam
@@ -90,9 +89,9 @@ class TestComplex:
     bam = "test_data/chr16_fus_dms.bam"
     fa = "test_data/fasta/chr12_16_17_subset.fa.gz"
 
-    def test_fus(self):
-      outpre = "fus_test/fus_"
-      
+    def test_fus(self, tmp_path):
+      outpre = tmp_path / "fus_"
+      outpre = str(outpre)
       if os.path.exists("fus_test/"):
         shutil.rmtree("fus_test/", ignore_errors=False, onerror=None)
       exe_dir = os.path.dirname(os.path.abspath((__file__)))
@@ -105,12 +104,16 @@ class TestComplex:
               "-k", "-v", 
               "-n", "ATCG"]
       out = subprocess.run(cmd_args, stdout = sys.stdout, stderr = sys.stderr)
-      print(" ".join(out.args))      
       assert out.returncode == 0
       tf = pysam.TabixFile(outpre + "pileup_table.tsv.bgz")
       for rec in tf.fetch("chr16:31199224-31199224"):
         # indel is counted
         assert rec.split("\t")[11] == "1"
+      
+      for rec in tf.fetch("chr16:31199225-31199225"):
+        # mismatches are counted
+        assert rec.split("\t")[10] == "3"
+      
       for rec in tf.fetch("chr16:31199225-31199225"):
         # mismatches are counted
         assert rec.split("\t")[10] == "3"

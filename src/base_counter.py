@@ -77,11 +77,7 @@ def generate_pileup(bam, fasta, min_depth, deletion_length,
     if not isinstance(region, list):
         region = [region]
         
-    #region = " ".join(region)
-    
     output = outpre + "pileup_table.tsv.gz"
-    
-    output_tmpbam = outpre + "filteredbam.bam"
     
     view_args = ["samtools", "view", "-h"]
     if samflag != " ":
@@ -99,24 +95,9 @@ def generate_pileup(bam, fasta, min_depth, deletion_length,
         stderr = sys.stderr,
         shell = False)
     
-   # bamfilter_cmd = "samtools view -h " + samflag + " " + bam + " " + region + \
-   #               " | filterBam -d " + str(deletion_length) + \
-   #               " | samtools view -b " + \
-   #               " > " + output_tmpbam + " ; " + \
-   #               " samtools index " + output_tmpbam
-
-   # filter_run = subprocess.run(bamfilter_cmd, 
-   #         shell=True, 
-   #         stderr = sys.stderr, 
-   #         stdout = sys.stdout)
-
-
     mpileup_args = conv_args(additional_args)
     
     mpileup_args = mpileup_args.split()
-    
-    pileup_cmd =  ["bcftools", "mpileup", "-a", "AD", "-f", fasta] + \
-                  mpileup_args + [output_tmpbam] 
     
     pileup_cmd =  ["samtools", "mpileup", "-f", fasta] + \
                   mpileup_args +  ["-"]
@@ -838,12 +819,8 @@ def main():
     
     if not is_tool("samtools"):
         sys.exit("samtools is not in path")
-    if not is_tool("bcftools"):
-        sys.exit("bcftools is not in path")
-    if not is_tool("pileup_to_counts.py"):
+    if not is_tool("mpileup_to_counts.py"):
         sys.exit("pileup_to_counts.py is not in path, please add rnastruct/src to your PATH")
-    if not is_tool("filterBam"):
-        sys.exit("filterBam is not in path, please add rnastruct/src to your PATH")
 
     
     pileup_args = get_pileup_args(args.pileup_arg_fn, args.pileup_args)
