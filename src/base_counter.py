@@ -819,9 +819,6 @@ def main():
     
     if not is_tool("samtools"):
         sys.exit("samtools is not in path")
-    if not is_tool("mpileup_to_counts.py"):
-        sys.exit("mpileup_to_counts.py is not in path, please add rnastruct/src to your PATH")
-
     
     pileup_args = get_pileup_args(args.pileup_arg_fn, args.pileup_args)
     fasta_name = args.fasta
