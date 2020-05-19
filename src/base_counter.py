@@ -29,7 +29,7 @@ from shutil import which
 from operator import itemgetter
 
 from utils import * 
-import pileup_to_counts
+import mpileup_to_counts
 
 bp_dict = {
         "A" : "T",
@@ -77,61 +77,68 @@ def generate_pileup(bam, fasta, min_depth, deletion_length,
     if not isinstance(region, list):
         region = [region]
         
-    region = " ".join(region)
+    #region = " ".join(region)
     
     output = outpre + "pileup_table.tsv.gz"
     
     output_tmpbam = outpre + "filteredbam.bam"
+    
+    view_args = ["samtools", "view", "-h"]
+    if samflag != " ":
+      view_args.append(samflag)
+    
+    view_args.append(bam)
 
-    bamfilter_cmd = "samtools view -h " + samflag + " " + bam + " " + region + \
-                  " | filterBam -d " + str(deletion_length) + \
-                  " | samtools view -b " + \
-                  " > " + output_tmpbam + " ; " + \
-                  " samtools index " + output_tmpbam
+    if len(region) > 0:
+        if region[0] != "":
+            view_args += region
 
-    filter_run = subprocess.run(bamfilter_cmd, 
-            shell=True, 
-            stderr = sys.stderr, 
-            stdout = sys.stdout)
+    view_cmd = subprocess.Popen(
+        view_args,
+        stdout = subprocess.PIPE,
+        stderr = sys.stderr,
+        shell = False)
+    
+   # bamfilter_cmd = "samtools view -h " + samflag + " " + bam + " " + region + \
+   #               " | filterBam -d " + str(deletion_length) + \
+   #               " | samtools view -b " + \
+   #               " > " + output_tmpbam + " ; " + \
+   #               " samtools index " + output_tmpbam
 
-    if verbose:
-        print("bamfilter command is:\n" + filter_run.args, 
-                file = sys.stderr)
+   # filter_run = subprocess.run(bamfilter_cmd, 
+   #         shell=True, 
+   #         stderr = sys.stderr, 
+   #         stdout = sys.stdout)
+
+
     mpileup_args = conv_args(additional_args)
-#    pileup_args = []
-#    for k,v in pileup_args.items():
-#      pileup_args.append("{}={}".format(k,v))
-#
-#    pileup_args = " ".join(pileup_args)
-#    pileup_cmd =  "bcftools " + \
-#                  "mpileup " + \
-#                  " -a AD " + \
-#                  "-f " + fasta + " " + \
-#                  mpileup_args + \
-#                  " " + output_tmpbam + " " \
-#                  " | " + \
-#                  "pileup_to_counts.py -v -  -d " + \
-#                  str(min_depth) + rev_flag + " -o " + output + \
-#                  " -b " + output_tmpbam
-#                  " --pileup-args " + pileup_args + " " 
+    
     mpileup_args = mpileup_args.split()
+    
     pileup_cmd =  ["bcftools", "mpileup", "-a", "AD", "-f", fasta] + \
                   mpileup_args + [output_tmpbam] 
+    
+    pileup_cmd =  ["samtools", "mpileup", "-f", fasta] + \
+                  mpileup_args +  ["-"]
+    
     pileup_run = subprocess.Popen(pileup_cmd, 
             shell=False, 
+            stdin = view_cmd.stdout,
             stderr = sys.stderr, 
-            stdout = subprocess.PIPE)
+            stdout = subprocess.PIPE,
+            universal_newlines = True)
     
-    # cyvcf2 can use a file descriptor to open vcf 
-    pileup_to_counts.vcf_to_counts(pileup_run.stdout.fileno(),
-                                   output_tmpbam,
-                                   output,
-                                   additional_args,
+    output_fh = gzip.open(output, 'wt')
+    mpileup_to_counts.mpileup_to_counts(pileup_run.stdout,
+                                   output_fh,
                                    min_depth = min_depth,
                                    return_comp = libtype == "antisense",
-                                   debug = False)
-    
+                                   debug = False,
+                                   max_del = deletion_length )
+    output_fh.close() 
     if verbose:
+        print("view command is:\n" + " ".join(view_cmd.args), 
+              file = sys.stderr)
 
         print("pileup command is:\n" + " ".join(pileup_run.args), 
                 file =sys.stderr)
@@ -371,28 +378,16 @@ def parse_library_type(bam_path, strandedness, libtype, skip_single_ended
         sam_flag_4 = "-f 64 -F 16"
         flags["antisense"].append(sam_flag_4)
         
-        #output = [[sam_flag_1, lib_type_1], 
-        #          [sam_flag_2, lib_type_2],
-        #          [sam_flag_3, lib_type_3],
-        #          [sam_flag_4, lib_type_4]]
-        
         if not skip_single_ended:
-            #output.append([ "-f 16 -F 1 ", "sense"])
-            #output.append(["-F17 ", "antisense"])
            
             flags["sense"].append("-f 16 -F 1")
             flags["antisense"].append("-F17 ")
 
       else:
         # single end
-        #output = []
         
         flags["sense"].append("-f 16 -F 1")
         flags["antisense"].append("-F17 ")
-        
-        #output.append([ "-f 16 -F 1 ", "sense"])
-        #output.append(["-F17 ", "antisense"])
-        
         
     elif strandedness == "fr-secondstrand":
       flags["sense"] = []
@@ -415,22 +410,12 @@ def parse_library_type(bam_path, strandedness, libtype, skip_single_ended
         sam_flag_4 = "-f 80"
         flags["antisense"].append(sam_flag_4)
         
-        #output = [[sam_flag_1, lib_type_1], 
-        #          [sam_flag_2, lib_type_2],
-        #          [sam_flag_3, lib_type_3],
-        #          [sam_flag_4, lib_type_4]]
-        
         if not skip_single_ended:
             flags["antisense"].append("-f 16 -F 1")
             flags["sense"].append("-F17 ")
-            #output.append([ "-f 16 -F 1 ", "antisense"])
-            #output.append(["-F17 ", "sense"])
 
       else:
         # single end
-        #output = []
-        #output.append([ "-f 16 -F 1 ", "antisense"])
-        #output.append(["-F17 ", "sense"])
         flags["antisense"].append("-f 16 -F 1")
         flags["sense"].append("-F17 ")
         
@@ -973,8 +958,6 @@ def main():
                           threads,
                           nucleotides)
       new_pileups.append(new_pileup)
-
-    #pdb.set_trace()
 
     print("merging and sorting pileup tables", file = sys.stderr)
     output_pileup_fn = outpre + "pileup_table.tsv.gz"

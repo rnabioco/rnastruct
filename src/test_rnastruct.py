@@ -1,7 +1,10 @@
 import gzip
 import os
+import sys
 import pileup_to_counts
-
+import subprocess
+import shutil
+import pysam
 
 class TestSimple:
     """ testing output file content for now """
@@ -83,8 +86,33 @@ class TestSimple:
 
           assert len(strands) == 1
 
-#class TestComplex:
-#    bam="test_data/pileup_to_counts/chr16_fus.bam"
-#    
-#    def test_fus(self):
+class TestComplex:
+    bam = "test_data/chr16_fus_dms.bam"
+    fa = "test_data/fasta/chr12_16_17_subset.fa.gz"
+
+    def test_fus(self):
+      outpre = "fus_test/fus_"
+      
+      if os.path.exists("fus_test/"):
+        shutil.rmtree("fus_test/", ignore_errors=False, onerror=None)
+
+      cmd_args = [
+              "base_counter.py",
+              "-b", self.bam,
+              "-f", self.fa,
+              "-d", "10",
+              "-o", outpre,
+              "-k", "-v", 
+              "-n", "ATCG"]
+      out = subprocess.run(cmd_args, stdout = sys.stdout, stderr = sys.stderr)
+      print(" ".join(out.args))      
+      assert out.returncode == 0
+      tf = pysam.TabixFile(outpre + "pileup_table.tsv.bgz")
+      for rec in tf.fetch("chr16:31199224-31199224"):
+        # indel is counted
+        assert rec.split("\t")[11] == "1"
+      for rec in tf.fetch("chr16:31199225-31199225"):
+        # mismatches are counted
+        assert rec.split("\t")[10] == "3"
+
 

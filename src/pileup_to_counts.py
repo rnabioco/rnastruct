@@ -243,11 +243,6 @@ class AlleleCounter():
             else:    
                 self.allele_counts["indel"] += self.v.INFO.get("IDV")
             self.is_indel = True
-            # set indel position based on strandedness
-            # if + just set to next position 
-            # if - set to length of REF 
-            # need to look into if right alignment of the indel is
-            # going to mess this up
 
             self.indel_pos = self.v.POS + 1
             
@@ -331,7 +326,7 @@ def vcf_to_counts(vcf_fn, bam_fn, out_fn, pileup_args, min_depth = 10, return_co
       
       if v.INFO.get('DP') < min_depth and v.POS not in ic.d and v.POS not in ic.refdepth:
           continue
-      #pdb.set_trace()
+      
       current_rec = AlleleCounter(v, bam, pileup_args, strand)
       
       if current_rec.is_indel:
