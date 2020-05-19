@@ -95,9 +95,9 @@ class TestComplex:
       
       if os.path.exists("fus_test/"):
         shutil.rmtree("fus_test/", ignore_errors=False, onerror=None)
-
+      exe_dir = os.path.dirname(os.path.abspath((__file__)))
       cmd_args = [
-              "base_counter.py",
+              os.path.join(exe_dir, "base_counter.py"),
               "-b", self.bam,
               "-f", self.fa,
               "-d", "10",
