@@ -639,7 +639,8 @@ def merge_pileup_tables(pileup_fns, output_pileup_fn, tmp_dir,
     out_tmp_sorted_ptable = unix_sort(output_tmp_fn, 
             output_pileup_fn, 
             threads,
-            memory = "8G", 
+            memory = "8G",
+            preserve_header = True,
             verbose = verbose)
 
 def format_tbls(fn1, fn2, outfn):
@@ -666,8 +667,9 @@ def main():
                         help ="""indexed bam file input,
                         by default the bam will be split into
                         forward and reverse bams,
-                        pass the forward and reverse bams
-                        to bypass splitting the bams
+                        Instead of using this script to split the bam 
+                        one can instead pass the forward and reverse bams
+                        to bypass
                         (i.e. forward.bam,reverse.bam)
                         \n""",
                         required = True)

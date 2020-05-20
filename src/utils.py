@@ -7,6 +7,7 @@ import os
 import sys
 import pdb
 import argparse
+
 from yaml import load, SafeLoader
 
 def is_complex_indel(ref, alt):
@@ -256,8 +257,7 @@ def bgzip(in_fn, remove = True):
     
     return out_fn
 
-def unix_sort(in_fn, out_fn, threads, memory = "8G", verbose = False):
-
+def unix_sort(in_fn, out_fn, threads, memory = "8G", preserve_header = False, verbose = False):
 
     sort_test = subprocess.run(["sort", "--parallel=2"],
               input = "hello world",
@@ -279,16 +279,40 @@ def unix_sort(in_fn, out_fn, threads, memory = "8G", verbose = False):
 
     out_fh = gzip.open(out_fn, 'wt', compresslevel = 6)
     
-    gunzip = subprocess.Popen(['gunzip', '-c', in_fn],
+    if preserve_header:
+        with gzip.open(in_fn, 'rt') as h:
+            header = h.readline()
+        with open(out_fn + ".tmp", 'w') as fp:
+            fp.write(header)
+        
+        gunzip = subprocess.Popen(['gunzip', '-c', in_fn],
             stdout=subprocess.PIPE)
-    sort_output = subprocess.Popen(sort_cmd,
-            stdin = gunzip.stdout,
-            stdout = subprocess.PIPE)
-    gzip_output = subprocess.Popen(["gzip"],
-            stdin = sort_output.stdout,
-            stdout = out_fh)
-    gunzip.stdout.close()
-    gzip_output.wait()
+        tail = subprocess.Popen(['tail', '-n+2'],
+                stdin = gunzip.stdout,
+                stdout = subprocess.PIPE)
+        sort_output = subprocess.Popen(sort_cmd,
+                stdin = tail.stdout,
+                stdout = subprocess.PIPE)
+        cat = subprocess.Popen(['cat', out_fn + ".tmp", "-"],
+                stdin = sort_output.stdout,
+                stdout = subprocess.PIPE)
+        gzip_output = subprocess.Popen(["gzip"],
+                stdin = cat.stdout,
+                stdout = out_fh)
+        gunzip.stdout.close()
+        gzip_output.wait()
+        os.unlink(out_fn + ".tmp")
+    else:
+        gunzip = subprocess.Popen(['gunzip', '-c', in_fn],
+            stdout=subprocess.PIPE)
+        sort_output = subprocess.Popen(sort_cmd,
+                stdin = gunzip.stdout,
+                stdout = subprocess.PIPE)
+        gzip_output = subprocess.Popen(["gzip"],
+                stdin = sort_output.stdout,
+                stdout = out_fh)
+        gunzip.stdout.close()
+        gzip_output.wait()
 
     if verbose:
         print("sort command is:\n" + " ".join(sort_output.args), file = sys.stderr)

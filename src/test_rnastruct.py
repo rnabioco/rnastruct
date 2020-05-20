@@ -118,4 +118,3 @@ class TestComplex:
         # mismatches are counted
         assert rec.split("\t")[10] == "3"
 
-
