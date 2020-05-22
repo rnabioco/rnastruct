@@ -478,14 +478,15 @@ def generate_mismatch_profile(input_bam, fasta, additional_args, depth, outpre,
        output_tbl = gzip.open(output, 'wt', compresslevel = 6)
        for idx, fn in enumerate(res):
            with gzip.open(fn, 'rt') as data:
+               shutil.copyfileobj(data, output_tbl)
 
-               if idx == 0:
-                   # keep header from first file
-                   shutil.copyfileobj(data, output_tbl)
-               else:
-                   # skip header for remaining
-                   data.readline()
-                   shutil.copyfileobj(data, output_tbl)
+              # if idx == 0:
+              #     # keep header from first file
+              #     shutil.copyfileobj(data, output_tbl)
+              # else:
+              #     # skip header for remaining
+              #     data.readline()
+              #     shutil.copyfileobj(data, output_tbl)
        
        output_tbl.close()
    
@@ -552,48 +553,6 @@ def generate_bedgraphs(pileup_fn, depth, outpre, threads, nucleotides,
        write_bedgraphs(res[0], res[1])
        write_pileup(res[2], res[3])
 
-def mismatch_stats(df, min_depth, nucs_to_keep):
-    
-    df = df.assign(mismatch_ratio = lambda df: df.mmcount / df.depth)
-    df = df.assign(indel_ratio = lambda df: df.indelcount / df.depth)
-    df = df.assign(mutation_ratio = lambda df: (df.mmcount + df.indelcount) / df.depth)
-    df = df.assign(stderr = lambda df:
-            (np.sqrt(df.mutation_ratio) / np.sqrt(df.depth)))
-    
-    df = df[df.depth >= min_depth]
-    df = df[df.ref_base.isin(nucs_to_keep)]
-    
-    return df
-
-def calc_mismatch_stats(pileup_fn, depth, outpre, threads, nucleotides,
-        chunk_size = 1000000):
-   
-   output_fn = os.path.splitext(pileup_fn)[0] + ".tmp"
-   
-   ## read in pileup table in chunks to keep memory low
-   try:
-       reader = pd.read_csv(pileup_fn, 
-           sep = "\t",
-           compression = 'gzip',
-           chunksize = chunk_size, 
-           iterator = True)
-   except pd.errors.EmptyDataError:
-       fout = gzip.open(output_fn, 'wt')
-       fout.close()
-       return output_fn
-
-   ## apply multithreading if cpus available
-   pool = mp.Pool(threads)
-   
-   func = partial(mismatch_stats,
-            min_depth = depth,
-            nucs_to_keep = nucleotides)
-   
-   ## res is a list of pandas df's and output filenames
-   for res in pool.imap(func, reader):
-       write_pileup_df(res, output_fn)
-   
-   return output_fn
 
 def compute_chunks(n_lines, n_default_lines = 100000):
     """
@@ -925,19 +884,9 @@ def main():
           
       pileup_tbls.append(pileup_tbl)
 
-    
-    new_pileups = []
-    for pileup in pileup_tbls:
-      new_pileup = calc_mismatch_stats(pileup, 
-                          depth,
-                          tmp_dir,
-                          threads,
-                          nucleotides)
-      new_pileups.append(new_pileup)
-
     print("merging and sorting pileup tables", file = sys.stderr)
     output_pileup_fn = outpre + "pileup_table.tsv.gz"
-    merge_pileup_tables(new_pileups, output_pileup_fn, tmp_dir, 
+    merge_pileup_tables(pileup_tbls, output_pileup_fn, tmp_dir, 
             threads, verbose = verbose)
 
     #### bgzip and index

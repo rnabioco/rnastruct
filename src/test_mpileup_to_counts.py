@@ -5,6 +5,7 @@ import utils
 import subprocess
 import sys
 import pandas as pd
+
 class TestParsingPileup:
     "read pileup format from test file and test"
     plp_fn = "test_data/mpileup_to_counts/pileups_to_test.txt"
@@ -19,7 +20,8 @@ class TestParsingPileup:
         mpileup_to_counts.mpileup_to_counts(f,
                     fo,
                     min_depth = 10, 
-                    max_del = 100)
+                    max_del = 100,
+                    header = True)
         f.close()
         fo.close()
         assert os.path.isfile(out_fn)
@@ -53,7 +55,8 @@ class TestParsingPileup:
         mpileup_to_counts.mpileup_to_counts(f,
                     fo,
                     min_depth = 10, 
-                    max_del = 4)
+                    max_del = 4,
+                    header = True)
         f.close()
         fo.close()
         assert os.path.isfile(out_fn)
@@ -84,7 +87,8 @@ class TestParsingPileup:
                     fo,
                     min_depth = 10,
                     return_comp = True,
-                    max_del = 4)
+                    max_del = 4,
+                    header = True)
         f.close()
         fo.close()
         assert os.path.isfile(out_fn)
@@ -121,7 +125,8 @@ class TestParsingPileup:
         mpileup_to_counts.mpileup_to_counts(f,
                     fo,
                     min_depth = 200, 
-                    max_del = 4)
+                    max_del = 4,
+                    header = True)
         f.close()
         fo.close()
         assert os.path.isfile(out_fn)
@@ -156,6 +161,7 @@ class TestPileuptocounts:
             return_comp = False,
             debug = False)
       fout.close()      
+      
       with open(expected_output, 'r') as exp:
           with gzip.open(out, 'rt') as res:
             for exp_idx, exp_line in enumerate(exp): 
