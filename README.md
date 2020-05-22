@@ -149,22 +149,10 @@ The following files will be generated:
 ```
 pileup_table.tsv.bgz
 pileup_table.tsv.bgz.tbi
-
-neg_depth.bedgraph.gz
-neg_indels.bedgraph.gz
-neg_mismatches.bedgraph.gz
-neg_mutations.bedgraph.gz
-pos_depth.bedgraph.gz
-pos_indels.bedgraph.gz
-pos_mismatches.bedgraph.gz
-pos_mutations.bedgraph.gz
 ```
 
 `pileup_table.tsv.bgz` contains per nucleotide counts of read depth, counts
 of each nucleotide, indels, and deletions.
-
-The `.bedgraph.gz` files are strand specific bedgraphs for mismatches and
-indels. 
 
 
 ## Subtract background signals and normalize
