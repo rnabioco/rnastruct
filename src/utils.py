@@ -257,7 +257,9 @@ def bgzip(in_fn, remove = True):
     
     return out_fn
 
-def unix_sort(in_fn, out_fn, threads, memory = "8G", preserve_header = False, verbose = False):
+def unix_sort(in_fn, out_fn, threads, memory = "8G", preserve_header =
+        False, verbose = False,
+        output_compression = 'gzip'):
 
     sort_test = subprocess.run(["sort", "--parallel=2"],
               input = "hello world",
@@ -296,7 +298,7 @@ def unix_sort(in_fn, out_fn, threads, memory = "8G", preserve_header = False, ve
         cat = subprocess.Popen(['cat', out_fn + ".tmp", "-"],
                 stdin = sort_output.stdout,
                 stdout = subprocess.PIPE)
-        gzip_output = subprocess.Popen(["gzip"],
+        gzip_output = subprocess.Popen([output_compression],
                 stdin = cat.stdout,
                 stdout = out_fh)
         gunzip.stdout.close()
@@ -308,7 +310,7 @@ def unix_sort(in_fn, out_fn, threads, memory = "8G", preserve_header = False, ve
         sort_output = subprocess.Popen(sort_cmd,
                 stdin = gunzip.stdout,
                 stdout = subprocess.PIPE)
-        gzip_output = subprocess.Popen(["gzip"],
+        gzip_output = subprocess.Popen([output_compression],
                 stdin = sort_output.stdout,
                 stdout = out_fh)
         gunzip.stdout.close()

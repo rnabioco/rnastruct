@@ -567,7 +567,8 @@ def compute_chunks(n_lines, n_default_lines = 100000):
 
 
 def merge_pileup_tables(pileup_fns, output_pileup_fn, tmp_dir, 
-        threads = 1, out_colnames = tbl_cols, verbose = True):
+        threads = 1, out_colnames = tbl_cols, verbose = True,
+        compression = 'bzip'):
     """ sort and merge the sense and antisense pileup tables
     samtools returns pileup format sorted by largest chromosome in 
     descending order
@@ -592,7 +593,8 @@ def merge_pileup_tables(pileup_fns, output_pileup_fn, tmp_dir,
             threads,
             memory = "8G",
             preserve_header = True,
-            verbose = verbose)
+            verbose = verbose,
+            output_compression = compression)
 
 def format_tbls(fn1, fn2, outfn):
      
@@ -877,13 +879,12 @@ def main():
       pileup_tbls.append(pileup_tbl)
 
     print("merging and sorting pileup tables", file = sys.stderr)
-    output_pileup_fn = outpre + "pileup_table.tsv.gz"
+    output_pileup_fn = outpre + "pileup_table.tsv.bgz"
     merge_pileup_tables(pileup_tbls, output_pileup_fn, tmp_dir, 
-            threads, verbose = verbose)
+            threads, verbose = verbose, compression = "bgzip")
 
-    #### bgzip and index
-    out_bgzip = bgzip(output_pileup_fn)        
-    pysam.tabix_index(out_bgzip, 
+    #### index
+    pysam.tabix_index(out_pileup_fn, 
                       seq_col = 0, 
                       start_col = 1,
                       end_col = 1, 
