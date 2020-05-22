@@ -479,14 +479,6 @@ def generate_mismatch_profile(input_bam, fasta, additional_args, depth, outpre,
        for idx, fn in enumerate(res):
            with gzip.open(fn, 'rt') as data:
                shutil.copyfileobj(data, output_tbl)
-
-              # if idx == 0:
-              #     # keep header from first file
-              #     shutil.copyfileobj(data, output_tbl)
-              # else:
-              #     # skip header for remaining
-              #     data.readline()
-              #     shutil.copyfileobj(data, output_tbl)
        
        output_tbl.close()
    
