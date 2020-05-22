@@ -6,6 +6,7 @@ import sys
 import os
 import sys
 import gzip
+import math
 from collections import Counter
 
 import utils
@@ -90,25 +91,36 @@ class PileupCounter():
         self.refcount = 0
         self.mmcount = 0
         self.ncount = 0
+        self.mismatch_ratio = 0.0
+        self.indel_ratio = 0.0
+        self.mutation_ratio = 0.0
+        self.stderr = 0.0
         self.indelcount = 0
         self.indelcovcount = 0
         self.indeldict = Counter()
         self.indelcov = Counter()
         self.ac = allele_counter()
         self.read_line(line)
-            
+                
     def __str__(self):
         return "\t".join([str(x) for x in self.to_counts()]) + "\n"
 
     def get_depth(self):
         return self.refcount + self.mmcount + self.indelcovcount
 
+    def mismatch_stats(self):
+        depth = self.get_depth() 
+        self.mismatch_ratio = float(self.mmcount) / depth
+        self.indel_ratio = float(self.indelcount) / depth
+        self.mutation_ratio = float((self.mmcount + self.indelcount)) / depth
+        self.stderr = math.sqrt(self.mutation_ratio) / math.sqrt(depth)
+    
     def to_counts(self):
         indel_counts = self.indelcount
         ref_counts = self.refcount
         mm_counts = self.mmcount
         depth_out = self.get_depth() 
-
+        self.mismatch_stats()
         if self.strand == "-":
             ref_nt = bp_comp[self.base]
 
@@ -123,7 +135,11 @@ class PileupCounter():
             self.ac[bp_comp["G"]],
             self.ac[bp_comp["T"]],
             mm_counts,
-            indel_counts
+            indel_counts,
+            self.mismatch_ratio,
+            self.indel_ratio,
+            self.mutation_ratio,
+            self.stderr
             ]
         else:
             out = [self.chrom,
@@ -137,7 +153,11 @@ class PileupCounter():
             self.ac["G"],
             self.ac["T"],
             mm_counts,
-            indel_counts
+            indel_counts,
+            self.mismatch_ratio,
+            self.indel_ratio,
+            self.mutation_ratio,
+            self.stderr
             ]
         return out
 
@@ -264,19 +284,24 @@ def write_header(fo):
      "gcount",
      "tcount",
      "mmcount",
-     "indelcount"]
+     "indelcount",
+     "mismatch_ratio",
+     "indel_ratio",
+     "mutation_ratio",
+     "stderr"]
   
   fo.write("\t".join(tbl_cols) + "\n")
 
 def mpileup_to_counts(fh, out_fh, min_depth = 10, return_comp = False,
-        debug = True, max_del = 4, region = None): 
+        debug = True, max_del = 4, region = None, header = False): 
       
   if return_comp:
       strand = "-"
   else:
       strand = "+"
   
-  write_header(out_fh)
+  if header:
+    write_header(out_fh)
   n_good_variants = 0
 
   ic = IndelCache()
@@ -284,7 +309,11 @@ def mpileup_to_counts(fh, out_fh, min_depth = 10, return_comp = False,
   for i,v in enumerate(fh):
       
       current_rec = PileupCounter(v, strand, max_del)
-     
+
+      # skip ambiguous or soft-masked sequences
+      if current_rec.base not in ref_nts:
+          continue
+
       if n_good_variants == 0:
           n_good_variants += 1
           ic = IndelCache(current_rec.chrom)
@@ -392,5 +421,6 @@ if __name__ == '__main__':
 
     mpileup_to_counts(fh, fo,
             int(args.depth), args.complement,
-            debug = args.verbose, max_del = args.deletion_length)
+            debug = args.verbose, max_del = args.deletion_length,
+            header = False)
 

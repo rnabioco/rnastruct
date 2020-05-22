@@ -25,7 +25,7 @@ def unix_sort2(infile, outfile, threads, memory = "8G", header = True, compress 
               encoding = 'ascii',
               stderr = subprocess.PIPE)
     if sort_test.returncode == 0:
-      parallel_args = "--parallel=" + str(threads)
+      parallel_args = " --parallel=" + str(threads)
     else:
       parallel_args = ""
       if verbose:
