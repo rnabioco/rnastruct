@@ -884,7 +884,7 @@ def main():
             threads, verbose = verbose, compression = "bgzip")
 
     #### index
-    pysam.tabix_index(out_pileup_fn, 
+    pysam.tabix_index(output_pileup_fn, 
                       seq_col = 0, 
                       start_col = 1,
                       end_col = 1, 
