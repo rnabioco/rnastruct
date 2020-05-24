@@ -26,4 +26,4 @@ install:
   - pip install -r src/requirements.txt
 
 script:
-  - cd src; bash run_tests.sh 
+  - cd src; bash run_tests.sh -cl 

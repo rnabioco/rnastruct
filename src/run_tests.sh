@@ -30,7 +30,7 @@ set -e -x
 if [[ "$l_flag" == "true" ]]; then
     echo "running local tests"
     
-  fa=$HOME/Projects/shared_dbases/genomes/human/chr_appended_grch37/Homo_sapiens.GRCh37.dna.primary_assembly_chrappended.fa 
+  fa="test_data/fasta/chr12_16_17_subset.fa.gz"
   data_dir="test_data"
   out_dir=$data_dir"/base_counter"
   bams=(
