@@ -775,6 +775,9 @@ def main():
     if not is_tool("samtools"):
         sys.exit("samtools is not in path")
     
+    if not is_tool("bgzip"):
+        sys.exit("bgzip is not in path, please install or add to path")
+    
     pileup_args = get_pileup_args(args.pileup_arg_fn, args.pileup_args)
     fasta_name = args.fasta
     depth = args.depth
