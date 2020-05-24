@@ -3,3 +3,4 @@ numpy>=1.17.2
 pysam>=0.15.3
 dask[dataframe]>=2.5.2
 PyYAML>=3.13
+scipy
