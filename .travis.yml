@@ -23,7 +23,6 @@ python:
   - "3.6"
 
 install:
-  - pip install Cython
   - pip install -r src/requirements.txt
 
 script:
