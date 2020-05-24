@@ -10,7 +10,7 @@ MacOS and linux:
 [`samtools`](http://www.htslib.org/download/)  
 [`python3`](https://www.python.org/downloads/)   
 
-Also python packages `pandas`, `cyvcf2`, `pysam`, and `dask`. See
+Also python packages `pandas`, `numpy`, `pysam`, and `dask`. See
 `requirements.txt` for additional requirements
 
 ## Install 
