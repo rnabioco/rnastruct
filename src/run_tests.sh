@@ -59,7 +59,7 @@ if [[ "$l_flag" == "true" ]]; then
   
   for (( i=0; i<${#bams[@]}; i++ ))
   do 
-    base_counter.py \
+    ./base_counter.py \
         -b $data_dir"/"${bams[$i]} \
         -f $fa \
         -n 'ACTG' \
@@ -71,7 +71,7 @@ if [[ "$l_flag" == "true" ]]; then
   done
 
   # filter and normalize
-  filter_and_norm.py \
+  ./filter_and_norm.py \
     -t $out_dir"/fus_dms_pileup_table.tsv.bgz" \
     -u $out_dir"/fus_ut_pileup_table.tsv.bgz" \
     -o $out_dir"/fus_norm_" \
@@ -106,7 +106,7 @@ if [[ "$l_flag" == "true" ]]; then
 
   for (( i=0; i<${#to_get[@]}; i++ ))
   do
-    tabix_to_bedgraph.py \
+    ./tabix_to_bedgraph.py \
         -i $out_dir"/fus_norm_pileup_table.tsv.bgz"\
         -c ${to_get[$i]} \
         -s "+" \
