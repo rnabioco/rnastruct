@@ -192,6 +192,13 @@ def main():
                         bed interval regions (for shape and Map only)
                         \n"""),
                         action = "store_true")
+    
+    parser.add_argument('--ac-only',
+                        help = textwrap.dedent("""\
+                        only keep reactivies from A and C nucleotides
+                        \n"""),
+                        action = "store_true")
+    
     parser.add_argument('-nc',
                         '--norm_cutoff',
                         help = textwrap.dedent("""\
@@ -228,7 +235,8 @@ def main():
     norm_data = args.norm
     norm_cutoff = args.norm_cutoff
     outtype = args.outtype
-        
+    ac_only = args.ac_only
+
     if outtype in ["M", "S"]:
         if norm_data and not norm_cutoff:
             norm_cutoff = get_global_norm(gene_fn, tbx, m_col, se_col)
@@ -313,8 +321,12 @@ def main():
         if outtype == "M":
             fout = open(os.path.join(output_dir, tx[3] + "_coverage.map"), 'w')
             for line in res_list:
+                if ac_only:
+                    if line[3] not in "AC":
+                        line[1] = -999.0
+                        line[2] = 0
                 if norm_data:
-                    if line[1] == -999:
+                    if line[1] == -999.0:
                         pass
                     else:
                         line[1] = float(line[1]) / norm_cutoff
