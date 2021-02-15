@@ -11,7 +11,7 @@ MacOS and linux:
 [`python3`](https://www.python.org/downloads/)   
 
 Also python packages `pandas`, `numpy`, `pysam`, and `dask`. See
-`requirements.txt` for additional requirements
+`src/requirements.txt` for additional requirements
 
 ## Install 
 
@@ -20,15 +20,9 @@ git clone git@github.com:rnabioco/rnastruct
 cd rnastruct/src
 ```
 
-Add `src` directory to your path by editing your `.bash_profile`
+Add `src` directory to your path by editing your `.bash_profile` or `.bashrc`
 ```bash
 export PATH="/Your/path/to/rnastruct/src:$PATH"
-```
-
-Source your `.bash_profile` 
-
-```bash
-source ~/.bash_profile
 ```
 
 
@@ -132,7 +126,7 @@ optional arguments:
 a tabix indexed flat tsv file. 
 
 The script generates and parses the output from running samtools
-[`mpileup`](http://www.htslib.org/doc/bcftools.html) and 
+[`mpileup`](http://www.htslib.org/doc/samtools.html) and 
 `mpileup_to_counts.py`
 
 ```bash
