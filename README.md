@@ -1,7 +1,4 @@
 # rnastruct
-[![Build Status](https://travis-ci.org/rnabioco/rnastruct.svg?branch=master)](https://travis-ci.org/rnabioco/rnastruct)
-
-# Getting started
 
 ## Requirements
 This pipeline requires the following programs and has been tested on
