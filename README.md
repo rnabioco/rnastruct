@@ -1,5 +1,9 @@
 # rnastruct
 
+[![Build
+status](https://github.com/rnabioco/rnastruct/workflows/github-actions/badge.svg)](https://github.com/rnabioco/rnastruct/actions)
+
+
 ## Requirements
 This pipeline requires the following programs and has been tested on
 MacOS and linux:

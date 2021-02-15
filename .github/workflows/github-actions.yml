@@ -12,14 +12,6 @@ jobs:
       uses: actions/setup-python@v2
       with:
         python-version: ${{ matrix.python-version }}
-    # - name: External dependencies
-    #   run: |
-    #      export PATH=$PWD/src/ci/:$PWD/bin:$PATH
-    #      mkdir -p deps && cd deps && source install_deps.sh && cd ..
-    #      pwd
-    #      echo $HOME
-    #      echo $PATH
-    #      find deps -executable -type f
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
